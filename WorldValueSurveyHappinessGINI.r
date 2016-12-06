@@ -331,18 +331,17 @@ for (i in 1:length(vars)) {
 ans[which(ans[,4]<.05),]
 
 summary(lm(c$LifeSatisfaction ~ c$supportGovtShouldProvide + c$wealthAtExpenseOfOthers))
-c$group <- cut(c$LifeSatisfaction,4)
+c$group <- cut(c$LifeSatisfaction,4,labels=c("Least Happy","Unhappy","Happy","Happiest"))
 
 #----------------Figure 7 mapping of happiness groups against beliefs about personal responsibility
 #                and the growth of wealth
 ggplot(c, aes(c$supportGovtShouldProvide,c$wealthAtExpenseOfOthers,label=c$Country)) + 
-   geom_label(aes(fill = factor(c$group)), colour = "white", fontface = "bold",show.legend = F) + 
+   geom_label(aes(fill = factor(c$group)), colour = "white", fontface = "bold",show.legend = T) + 
   labs(x="1=Govt. Should Provide Support  10=People should take responsibility for themselves",
        y="1=Wealth is at expense of others 10=Wealth can grow for everyone") +
   ggtitle(expression(atop('WVS data 2010-2014',  
-                          atop("Red=Least Happiest Countries    Purple=Happiest Countries",
-                               atop("R-squared: 0.44"))))) +
-  theme(plot.title = element_text(size=16))
+                               atop("R-squared: 0.44")))) +
+  theme(plot.title = element_text(size=16),legend.position="bottom") + guides(fill=guide_legend(title="Happiness Group: "))
   
 ggplot(c, aes(c$supportGovtShouldProvide,c$wealthAtExpenseOfOthers,label=c$Country)) + 
   geom_label(aes(fill = factor(cut(c$`GINI index (World Bank estimate), average 2000-13`,4))), colour = "white", fontface = "bold",show.legend = F) + 
@@ -412,7 +411,7 @@ summary(lm(c$LSbottom4IncDec ~ c$`GINI index (World Bank estimate), average 2000
 ggplot(c, aes(c$`GINI index (World Bank estimate), average 2000-13`, 
               c$LSbottom4IncDec,label = as.character(trimws(c$Country)))) + geom_text(size = 3)  +
   geom_smooth(method = 'lm') + labs(x="GINI index (World Bank estimate), average 2000-13",y="Life Satisfaction") +
-  ggtitle(expression(atop('WSV 2016 Life Satisfaction of Bottom 4 Self-reported Income Deciles',  
+  ggtitle(expression(atop('WVS 2016 Life Satisfaction of Bottom 4 Self-reported Income Deciles',  
                           atop("R-squared: 0.13")))) + theme(plot.title = element_text(size=16))
 
 
@@ -425,7 +424,7 @@ summary(lm(c$`Standard deviation/Mean of ladder by country-year` ~ c$`GINI index
 ggplot(c, aes(c$`GINI index (World Bank estimate), average 2000-13`, 
               c$StdDevLS,label = as.character(trimws(c$Country)))) + geom_text(size = 3)  +
   geom_smooth(method = 'lm') + labs(x="GINI index (World Bank estimate), average 2000-13",y="Standard Deviation Life Satisfaction") +
-  ggtitle(expression(atop('WSV 2016 Standard Deviation of Life Satisfaction',  
+  ggtitle(expression(atop('WVS 2016 Standard Deviation of Life Satisfaction',  
                           atop("R-squared: 0.02")))) + theme(plot.title = element_text(size=16))
 
 
@@ -460,12 +459,12 @@ summary(lm(e$pctLSchg ~ e$pctGINIchg))
 #-----------------Figure 4 -------------------------------------------------------------------------
 ggplot(e, aes(e$GINIchg/100,e$LSchg,label = as.character(trimws(e$Country)))) + geom_text(size = 3)  +
   geom_smooth(method = 'lm') + labs(x="Change in GINI",y="Change in Life Satisfaction") +
-  ggtitle(expression(atop('WSV Data 1995-1998 to 2010-2015',  
+  ggtitle(expression(atop('WVS Data 1995-1998 to 2010-2015',  
                           atop("R-squared: 0.07")))) + theme(plot.title = element_text(size=16))
 
 ggplot(e, aes(e$pctGINIchg,e$pctLSchg,label = as.character(trimws(e$Country)))) + geom_text(size = 3)  +
   geom_smooth(method = 'lm') + labs(x="% Change in GINI",y="% Change in Life Satisfaction") +
-  ggtitle(expression(atop('WSV Data 1995-1998 to 2010-2015',  
+  ggtitle(expression(atop('WVS Data 1995-1998 to 2010-2015',  
                           atop("R-squared: 0.19")))) +
   theme(plot.title = element_text(size=16)) + scale_x_continuous(labels = percent) +
   scale_y_continuous(labels = percent)
@@ -494,7 +493,7 @@ summary(lm(f$pctLSchg ~ f$pctGDPperCapchg))
 #---------Figure 5  % Changes in Life Satisfaction vs % Changes in PPP GDP/Capita -------------------
 ggplot(f, aes(f$pctGDPperCapchg,f$pctLSchg,label = as.character(trimws(f$Country)))) + geom_text(size = 3)  +
   geom_smooth(method = 'lm') + labs(x="% Change in PPP GDP/Capita",y="% Change in Life Satisfaction") +
-  ggtitle(expression(atop('WSV Data 1995-1998 to 2010-2015',  
+  ggtitle(expression(atop('WVS Data 1995-1998 to 2010-2015',  
                           atop("R-squared: 0.00")))) +
   theme(plot.title = element_text(size=16)) + scale_x_continuous(labels=percent) +
   scale_y_continuous(labels = percent)
