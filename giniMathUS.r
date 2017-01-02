@@ -14,6 +14,7 @@ con = dbConnect(SQLite(),
                 dbname="/home/hugh/Downloads/census.sqlite")
 
 # cen <- read_dta("~/Downloads/usa_00003.dta/usa_00003.dta")
+# cen <- read_dta("~/Downloads/usa_00004.dta/usa_00004.dta")
 # cen <- read_dta("~/Downloads/usa_00005_1990_data.dta/usa_00005_1990_data.dta")
 
 # Because data from https://usa.ipums.org is so large (1.4 GB, 
@@ -25,9 +26,9 @@ con = dbConnect(SQLite(),
 
 # -------------- individual and household GINI calculaiton -------------------
 
-qryYear = "2010"
+qryYear = "1950"
 
-dat <- data.table(dbGetQuery(con, paste("select * from Census WHERE year=",qryYear)))
+dat <- data.table(dbGetQuery(con, paste("select * from CensusTwo WHERE year=",qryYear)))
 
 # all stats calculated using weights
 summary(dat$hhwt)
