@@ -70,7 +70,8 @@ dat[,ageDecade := age%/%10]
 
 z <- dat[age>19 & !is.na(inctot),.(incwage,education,ageDecade,perwt)]
 
-zz<- by(z, list(z$education,z$ageDecade), function(x) weighted.mean(x$incwage, x$perwt))
+zz<- do.call("rbind", as.list(by(z, list(z$education,z$ageDecade),
+                                 function(x) weighted.mean(x$incwage, x$perwt))))
 
 
 dat[,incEduc := numIncPerHouse * education]
