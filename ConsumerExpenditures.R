@@ -47,7 +47,7 @@
 # use forward slashes instead of back slashes
 
 # uncomment this line by removing the `#` at the front..
-# setwd( "C:/My Directory/CES/" )
+setwd( "~/Downloads/SCF/" )
 # ..in order to set your current working directory
 
 
@@ -262,13 +262,34 @@ svyby(
 
 # calculate the median and other percentiles #
 
+################### HUGH WHELAN CODE ##################################################
+library(reldist)
 # minimum, 25th, 50th, 75th, maximum
 # annual expenditure in the united states
-svyquantile(
+exp<-svyquantile(
 	~annexp ,
 	design = fmly.design ,
-	c( 0 , .25 , .5 , .75 , 1 )
+	c( seq(0,1,0.01) )
 )
+
+incbtx <- svyquantile(
+  ~fincbtxm ,
+  design = fmly.design ,
+  c( seq(0,1,0.01) )
+)
+
+incatx <- svyquantile(
+  ~finatxem ,
+  design = fmly.design ,
+  c( seq(0,1,0.01) )
+)
+
+gini(exp)
+gini(incbtx)
+gini(incatx)
+
+
+########################### END HUGH WHELAN CODE #######################################
 
 
 # by urban/rural
