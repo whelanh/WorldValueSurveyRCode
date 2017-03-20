@@ -135,7 +135,32 @@ P1 <- p + theme_bw()  + labs(fill = "% Atheist, Agnostic,\nNothing in Particular
 P1 + scale_y_continuous(breaks=c()) + scale_x_continuous(breaks=c()) +
   theme(panel.border =  element_blank())
 
+mig <- pewUS[,sum(WEIGHT*(qf2=="Very important"))/sum(WEIGHT),
+             by=state]
+mig$state <- trimws(tolower(mig$state))
 
+stGDP <- read.csv(file="~/Downloads/stateGDP2015.csv",header = F)
+colnames(stGDP) <- c("state","GDPperCapita")
+stGDP$state <- trimws(tolower(stGDP$state))
+
+mig <- merge(mig,stGDP,by="state")
+mig <- mig[state!="district of columbia",]
+plot((mig$GDPperCapita),mig$V1)
+
+mig$region <- trimws(tolower(mig$state))
+
+Total <- merge(states_map,mig,by="region")
+Total <- as.data.table(Total)
+Total <- Total[Total$region!="district of columbia",]
+Total <- Total[order(Total$order),]
+# 2014 State Distribution of Atheist, Agnostic and Nothing in Particular
+p <- ggplot()
+p <- p + geom_polygon(data=Total, aes(x=long, y=lat, group=group,
+                                      fill=100*Total$V1),colour="white") + scale_fill_viridis(option = "magma") 
+P1 <- p + theme_bw()  + labs(fill = "% Atheist, Agnostic,\nNothing in Particular" 
+                             ,title = "Pew Research Poll 2014", x="", y="")
+P1 + scale_y_continuous(breaks=c()) + scale_x_continuous(breaks=c()) +
+  theme(panel.border =  element_blank())
 
 a <- pewUS[,.(sum(WEIGHT),
              sum(WEIGHT * (educ==
@@ -181,6 +206,24 @@ a <- pewUS[,.(sum(WEIGHT),
              sum(WEIGHT * (qg1b!="Absolutely certain"),na.rm = T),
              sum(WEIGHT * (DENOM!=SPDENOM),na.rm = T)/sum(WEIGHT*(!is.na(SPDENOM)))),
            by=DENOM]
+
+pewUS[agerec!="Age 25-29" & agerec!="Age 24 or younger",
+      sum(WEIGHT * (qf2=="Very important"))/sum(WEIGHT)]
+pewUS[agerec!="Age 25-29" & agerec!="Age 24 or younger" & DENOM!=SPDENOM & !is.na(SPDENOM),
+      sum(WEIGHT * (qf2=="Very important"))/sum(WEIGHT)]
+pewUS[agerec!="Age 25-29" & agerec!="Age 24 or younger" & DENOM==SPDENOM & !is.na(SPDENOM),
+      sum(WEIGHT * (qf2=="Very important"))/sum(WEIGHT)]
+pewUS[!is.na(SPDENOM) & agerec!="Age 25-29" & agerec!="Age 24 or younger",
+      sum(WEIGHT * (DENOM==SPDENOM))/sum(WEIGHT)]
+
+
+pewUS[agerec=="Age 25-29" | agerec=="Age 24 or younger",
+      sum(WEIGHT * (qf2=="Very important"))/sum(WEIGHT)]
+pewUS[(agerec=="Age 25-29" | agerec=="Age 24 or younger") & DENOM==SPDENOM & !is.na(SPDENOM),
+      sum(WEIGHT * (qf2=="Very important"))/sum(WEIGHT)]
+pewUS[!is.na(SPDENOM) & (agerec=="Age 25-29" | agerec=="Age 24 or younger"),
+      sum(WEIGHT * (DENOM==SPDENOM))/sum(WEIGHT)]
+
 
 all <- pewUS[,.(sum(WEIGHT),
               sum(WEIGHT * (educ==
