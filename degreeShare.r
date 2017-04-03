@@ -176,7 +176,7 @@ t <- merge(t,t2,by="super_opeid")
 
 # Data for Table 1
 x<-t[count.x>150 & substr(t$tier_name.x,0,8) != "Two-year",
-     .(weighted.median(k_q5,count.x),sum(count.x)),by=barrons]
+     .(weighted.median(k_0inc,count.x), weighted.median(k_q5,count.x),sum(count.x)),by=barrons]
 x$V2 <- x$V2/sum(x$V2)
 x <- x[order(barrons,decreasing = F),]
 x$cumShare <- cumsum(x$V2)
