@@ -222,13 +222,3 @@ ggplot(tmp,aes(index(tmp))) +
        x="Year",
        title="Trailing 30 Year Real Growth, Non-Farm Business Sector:\n Real Output/Hour vs. Real Compensation/Hour")
 
-
-#Figure 6
-ggplot(gdp_sub,aes(index(gdp))) +
-  geom_line(aes(y=diff,colour="Difference Between Comp/Hour\n and Output/Hour")) +
-  geom_line(aes(y=OPHNFB,colour="Increase in Participation Rate")) + theme_bw() +
-  scale_y_continuous(labels=scales::percent) +
-  labs(y="Trailing 20 Year Growth p.a.",
-       x="Year",
-       title="Trailing 20 Year Real Growth, Non-Farm Business Sector:\n Real Output/Hour vs. Real Compensation/Hour")
-
