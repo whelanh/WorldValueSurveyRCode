@@ -1,0 +1,200 @@
+---
+title: "Untitled"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r pressure, echo=FALSE}
+library(twitteR)
+library(data.table)
+library(stringi)
+library(Hmisc)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(quantmod)
+library(ggplot2)
+library(reshape2)
+
+options(knitr.table.format = "latex")
+#https://www.r-bloggers.com/setting-up-the-twitter-r-package-for-text-analytics/
+# Change the next four lines based on your own consumer_key, consume_secret, access_token, and access_secret. 
+consumer_key <- "xxx"
+consumer_secret <- "xxx"
+access_token <- "xxx"
+access_secret <- "xxx"
+
+setup_twitter_oauth(consumer_key, consumer_secret, access_token, access_secret)
+# tw = twitteR::searchTwitter('trancazo + Trancazo', n = 15000, since = '2017-06-15', 
+#                             retryOnRateLimit = 1e3)
+# 
+# tw2 = twitteR::searchTwitter('protesta', n = 15000, since = '2017-06-15', 
+#                             retryOnRateLimit = 1e3)
+
+register_sqlite_backend("Tweets.db")
+# store_tweets_db(tw,"trancazo")
+# store_tweets_db(tw2,"protesta")
+
+# n = search_twitter_and_store("Maduro", table_name = "maduro",retryOnRateLimit = 1e3)
+
+# dt2 <- load_tweets_db(TRUE,"protesta")
+# 
+# userInfo <- lookupUsers(dt2[,11]) 
+# 
+# store_users_db(userInfo, table_name="usersProtest")
+
+con = dbConnect(SQLite(), 
+                dbname="C:/Users/whela/Dropbox/Tweets.db")
+
+t <- (dbGetQuery(con,"select * from trancazo"))
+p <- (dbGetQuery(con,"select * from protesta"))
+d <- data.table(rbind(t,p))
+setkey(d,id)
+d <- d[!duplicated(d[,id])]
+
+
+u <- (dbGetQuery(con,"select * from usersTranc"))
+u2 <- dbGetQuery(con,"select * from usersProtest")
+uc <- data.table(rbind(u,u2))
+setkey(uc,id)
+uc <- uc[!duplicated(uc[,id])]
+
+# kable(tail(uc[,.N,by=stri_trans_tolower(location)][order(N)],20),booktabs = T) %>% kable_styling(latex_options = c("striped"))
+
+convert_date_column = function(column) {
+  as.POSIXct(column, tz="UTC", origin="1970-01-01")
+}
+
+uc[,createdD:=convert_date_column(uc[,created])]
+d[,txtCreatedD:=convert_date_column(d[,created])]
+dt <- merge(d,uc,by.x = "screenName",by.y = "screenName")
+hist(year(d[,txtCreatedD]))
+
+# Table 1
+tab <- uc[,.N,by=lang]
+tab$N <- round(100*tab$N/sum(tab$N),1)
+tab <- head(tab[order(tab$N,decreasing = T)],10)
+colnames(tab) <- c("Language","%")
+kable(tab,booktabs = T,caption = "Tweeters By Language") %>% kable_styling(font_size = 12,latex_options = c("striped"))
+
+# Most popular texts
+jnk2<-d[,.N,by=substr(text,1,90)]
+jnk2 <- head(jnk2[order(N,decreasing = T),],10)
+
+# Most popular texts not retweet?
+jnk2<-d[isRetweet==0,.N,by=substr(text,1,90)]
+jnk2 <- head(jnk2[order(N,decreasing = T),],10)
+
+summary(uc[,followersCount])
+# Figure 2
+hist(uc[followersCount<2000,followersCount],main = "Distribution of Followers Of Tweeters",xlab = "Followers")
+# Figure 1
+hist(uc[,year(createdD)],main = "Distribution of Year Tweeters Joined Twitter",xlab = "Year")
+
+# Nearly all in VZLA
+loc <- uc[,.N,by=location]
+loc <- loc[order(N,decreasing = T),]
+loc[1,1]<-"Missing"
+loc$location <- stri_trans_tolower(loc$location)
+
+patterns <- c("vene","cara","marac","barqu","vz","#vene")
+result <- filter(loc, grepl(paste(patterns, collapse="|"), location))
+# Pie Chart with Percentages
+slices <- c(loc[1,2],sum(result$N),nrow(uc)-loc[1,2]-sum(result$N))
+slices <- as.data.frame(slices)
+lbls <- c("Missing", "Venezuela", "Other")
+pct <- round(slices/sum(slices)*100)
+lbls <- paste(lbls, pct) # add percents to labels 
+lbls <- paste(lbls,"%",sep="") # ad % to labels 
+pie(as.numeric(slices),labels = lbls, col=rainbow(length(lbls)),
+  	main="Pie Chart of Tweeters By Country")
+
+twtrs <- dt[,.(.N,sum(isRetweet),mean(followersCount)),by=screenName]
+
+xx <- dt[isRetweet==0,.(screenName,substr(text,1,50),
+                           favoriteCount,retweetCount,followersCount)]
+# No strong relationship between retweetCount and number of followers
+plot(xx[,followersCount],xx[,retweetCount])
+
+# Table 2
+yy <- uc[,.(screenName,followersCount,statusesCount,friendsCount,lang,location)]
+yy <- head(yy[order(followersCount,decreasing = T)],20)
+colnames(yy) <- c("Screen Name", "Followers", "Total Tweets","Follows","Language","Location")
+kable(yy, booktabs=T,caption = "Tweeters From 7 PM 7/4 - 8 AM 7/5 VZLA Time By No. Of Followers") %>% kable_styling(font_size = 10,latex_options = c("striped"))
+
+# Table 3
+xx <- head(xx[order(retweetCount,decreasing = T)],20)
+colnames(xx) <- c("Screen Name", "Text", "Liked","Retweeted","Followers")
+kable(xx, booktabs=T,caption = "Most Retweeted Texts: 7 PM 7/4 - 8 AM 7/5 VZLA Time") %>% kable_styling(font_size = 9,latex_options = c("striped"))
+
+
+
+
+# Similarly no strong relationship between number of tweets and number of followers
+zz <- dt[,.(.N,mean(followersCount)),by=screenName]
+plot(zz$V2,zz$N)
+
+paste("times of tweets in VZ timezone:",summary(dt$txtCreatedD-60*60*4))
+
+# usrs500 <- head(uc[followersCount>498 & followersCount < 502,],15)
+# # Look at followers of 15 tweeters with approx. 500 followers
+# x <- c()
+# t <- lookupUsers(usrs500$screenName)
+# # Rate limited to get followers for 15 users
+# for (i in 1:15) {
+#   followers<-t[[i]]$getFollowerIDs()   #Get the Followers UserIDs
+#   x <- rbind(x,cbind(followers,rep(usrs500$screenName[i],length(followers))))
+# }
+# 
+# x<-data.table(x)
+# dbWriteTable(con, "users500", x)
+x <- data.table(dbGetQuery(con,"select * from users500"))
+nrow(x)
+y <- x$followers
+paste(length(unique(y))/nrow(x), "of 15 500 followed followers are unique")
+
+t <- x[,.N,by=V2]
+overl <- c()
+for (i in 1:15) {
+  z <- merge(x[V2==t$V2[i],],uc,by.x="followers",by.y="id",all = F)
+  overl <- c(overl,nrow(z))
+
+}
+# Much less than 1% overlap between followers and all tweeters for these 15 tweeters
+summary(overl/nrow(uc))
+
+hdf <- userTimeline("lortegadiaz",n=3200,includeRts = T) 
+myDf <- twListToDF(hdf)
+dbWriteTable(con, "luisa", myDf)
+plot(myDf$created, myDf$favoriteCount)
+
+# mdf <- userTimeline("nicolasmaduro",n=3200,includeRts = T) 
+# myDf2 <- twListToDF(mdf)
+# dbWriteTable(con, "madTweet", myDf2)
+# plot(myDf2$created, myDf2$favoriteCount)
+
+myDf2 <- data.table(myDf2)
+myDf <- data.table(myDf)
+
+l <- myDf[created>"2016-12-29",]
+m <- myDf2[created>"2014-12-29",]
+
+ll <- l[,mean(favoriteCount), by = .(year(created), month(created))]
+ll[,dt:=as.Date(paste(ll$year,"/",ll$month,"/",15,sep=''),"%Y/%m/%d")]
+
+
+mm <- m[,mean(favoriteCount), by = .(year(created), month(created))]
+mm[,dt:=as.Date(paste(mm$year,"/",mm$month,"/",15,sep=''),"%Y/%m/%d")]
+
+l[,Tweeter:="Luisa Ortega Diaz"]
+m[,Tweeter:="Nicolas Maduro"]
+td <- rbind(l,m)
+
+# Figure 3
+ggplot(data=td,aes(x=created, y=favoriteCount, colour=Tweeter)) + geom_line() +  labs(y="Tweets Liked", x="Date",title="2017: Luisa Ortega Diaz vs. Nicolas Maduro Tweet Popularity")
+```
+
+
