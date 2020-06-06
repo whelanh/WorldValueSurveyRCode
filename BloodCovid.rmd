@@ -46,7 +46,7 @@ Covid death data is from J. Hopkins and population data is from the World Bank (
 
 ## Code
 
-The R-code that includes links to the data I used is at <> in case anyone wants to run the analysis themselves or validate the results.
+The R-code that includes links to the data I used is [at Github](https://github.com/whelanh/WorldValueSurveyRCode/blob/master/BloodCovid.rmd) in case anyone wants to run the analysis themselves or validate the results.
 
 ```{r include=FALSE}
 library(data.table)
