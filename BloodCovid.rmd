@@ -36,7 +36,7 @@ As ABO distributions vary by country (see <https://blogs.sas.com/content/iml/201
 * We know a-prior that Asian countries have had relatively low Covid death rates. So it may be correlatioin without causation, but **a country's percentage of B+ blood types is a statistically significant "predictor" of its Covid death rate.**
 * Again it may be coincidental (or due to other factors like mask usage), but within the US, Non-Hispanic Asians have significantly lower Covid deaths than would be predicted by their proportion of the population.
 
-There are existing studies on ABO blood types and Covid. One possibly study confirming **lower risk for B+ patients** is [here](https://www.medrxiv.org/content/10.1101/2020.05.08.20095083v1.full.pdf).  One study [here](https://www.medrxiv.org/content/10.1101/2020.04.08.20058073v1.full.pdf) indicate **more vulnerability for B blood groups**. 
+There are existing studies on ABO blood types and Covid. One possibly study confirming **lower risk for B+ patients** is [here](https://www.medrxiv.org/content/10.1101/2020.05.08.20095083v1.full.pdf).  One study [here](https://www.medrxiv.org/content/10.1101/2020.04.08.20058073v1.full.pdf) indicates **more vulnerability for B blood groups**. 
 
 ## Data
 
