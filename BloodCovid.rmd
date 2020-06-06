@@ -1,0 +1,202 @@
+---
+title: "Covid Mortality vs Blood Type"
+author: "Hugh  Whelan"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Updated on: `r Sys.Date()`
+
+## Background
+
+A study referenced at <https://www.news-medical.net/news/20200603/Blood-group-type-may-affect-susceptibility-to-COVID-19-respiratory-failure.aspx> reported:
+
+>"A lead SNP was also identified on chromosome 9 at the ABO blood group locus, and further analysis showed that A-positive participants were at a 45% increased for respiratory failure, while individuals with blood group O were at a 35% decreased risk for respiratory failure.
+
+>The authors say that early clinical reports have suggested the ABO blood group system is involved in determining susceptibility to COVID-19 and has also been implicated in susceptibility to SARS-CoV-"1."
+
+As ABO distributions vary by country (see <https://blogs.sas.com/content/iml/2014/11/07/distribution-of-blood-types.html>), the question arises: **Do blood type distribution differences help explain differences in Covid death rates across countries?**
+
+* **Cross-country analysis is inherently problematic because of the widely differing standards and efficiency used to record Covid deaths.**
+  * Additional confounding factors are the timelines of infection and different policies relating to lockdowns and nursing homes.
+* The country mortality variable I use is Covid deaths as a percent of a country's population aged 65 and older.  Nearly all Covid deaths occur in this age group, thus normalizing by this population compensates for countries with different relative proportions of potentially vulnerable citizens.
+* I arbitrarily only include countries with >= 20 reported Covid deaths (N=80).  
+
+## Results
+
+* **Contrary to the article cited above, I did not find that A+ and O blood types were helpful in explaining country differences in Covid death rates** (see the last section below).
+* I did a principal component analysis of country blood type data that helped illustrate that blood type country distributions cluster by region.
+* That analysis highlighed that **Asian countries stand out in having relatively high percentages of B+ blood types in their populations.**
+* We know a-prior that Asian countries have had relatively low Covid death rates. So it may be correlatioin without causation, but **a country's percentage of B+ blood types is a statistically significant "predictor" of its Covid death rate.**
+* Again it may be coincidental (or due to other factors like mask usage), but within the US, Non-Hispanic Asians have significantly lower Covid deaths than would be predicted by their proportion of the population.
+
+There are existing studies on ABO blood types and Covid. One possibly study confirming **lower risk for B+ patients** is [here](https://www.medrxiv.org/content/10.1101/2020.05.08.20095083v1.full.pdf).  One study [here](https://www.medrxiv.org/content/10.1101/2020.04.08.20058073v1.full.pdf) indicate **more vulnerability for B blood groups**. 
+
+## Data
+
+Blood type distribution was sourced from <http://www.rhesusnegative.net/themission/bloodtypefrequencies/>.  I hand coded the "continent" designation and the resulting data set is available at <https://docs.google.com/spreadsheets/d/1XsOS4B0PtQyK1xTSF5GaFWuVCo-tKSGWrXvhxF8e4Nk/edit?usp=sharing>
+
+Covid death data is from J. Hopkins and population data is from the World Bank (see code for links).
+
+## Code
+
+The R-code that includes links to the data I used is at <> in case anyone wants to run the analysis themselves or validate the results.
+
+```{r include=FALSE}
+library(data.table)
+library(lubridate)
+library(readr)
+library(gsheet)
+library(formattable)
+library(kableExtra)
+
+# JHCounty data upates after 8 pm Eastern Time
+if(hour(Sys.time()) >21) {
+  dt <- Sys.Date()
+} else {
+  dt <- Sys.Date() - 1
+}
+  
+yest <- paste0(month(dt),"-",day(dt),"-",year(dt))
+
+# John Hopkins Daily Reports
+urlfile=paste0("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/",
+               format(as.Date(yest,format="%m-%d-%y"),"%m-%d-%Y"),".csv")
+JHcounty<-data.table(read_csv(url(urlfile)))
+
+# original source of blood type data: http://www.rhesusnegative.net/themission/bloodtypefrequencies/
+
+blood <- data.table(gsheet2tbl("docs.google.com/spreadsheets/d/1XsOS4B0PtQyK1xTSF5GaFWuVCo-tKSGWrXvhxF8e4Nk"))
+colnames(blood)<-c("Country_Region","pop","Op","Ap","Bp","ABp","Om","Am","Bm","ABm","Region")
+
+countryData<-JHcounty[, lapply(.SD, sum, na.rm=TRUE), by=Country_Region, .SDcols=c("Confirmed", "Deaths") ] 
+countryData<-countryData[,DeathsPctConfirmed:=Deaths/Confirmed]
+countryData<-countryData[Deaths>9,]
+
+popDatInt<-data.table(gsheet2tbl("https://docs.google.com/spreadsheets/d/1mUKtROXwf_LR0vNUMe1qMEggMfvrj-nKZBnWmjJILWs"))
+
+popDatIntPct<-data.table(gsheet2tbl("https://docs.google.com/spreadsheets/d/1lnCa30evhXpX-47N7X6LfwFsZ-N0LCkOawlDjpaFWUs"))
+popDatIntPct <- popDatIntPct[,.(Country.Name,x2018)]
+colnames(popDatIntPct)<-c("Country.Name","pct65")
+popDatInt<-popDatInt[,.(Country.Name,x2018)]
+popDatInt <- merge(popDatInt,popDatIntPct,by="Country.Name",all.x = T)
+
+colnames(popDatInt)<-c("Country_Region","popGE65","pctGE65")
+popDatInt[Country_Region=="Egypt, Arab Rep.",  Country_Region:="Egypt"]
+popDatInt[Country_Region=="United States",  Country_Region:="US"]
+popDatInt[Country_Region=="Russian Federation",  Country_Region:="Russia"]
+popDatInt[Country_Region=="Korea, Rep.",  Country_Region:="Korea, South"]
+popDatInt[Country_Region=="Czech Republic",  Country_Region:="Czechia"]
+popDatInt[Country_Region=="	Congo, Dem. Rep.",  Country_Region:="Congo (Kinshasa)"]
+popDatInt[Country_Region=="Iran, Islamic Rep.",  Country_Region:="Iran"]
+popDatInt[Country_Region=="Congo, Dem. Rep.",  Country_Region:="Congo (Kinshasa)"]
+
+countryData<-merge(countryData,popDatInt,by="Country_Region",all.x=T)
+countryData<-countryData[Country_Region!="Diamond Princess",]
+countryData[,DeathPctPopGE65:=Deaths/popGE65]
+countryData<-countryData[order(-DeathPctPopGE65),]
+
+# load package
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+blood[Country_Region=="United States",Country_Region:="US"]
+blood[Country_Region=="Korea",Country_Region:="Korea, South"]
+blood[Country_Region=="Czech Republic",Country_Region:="Czechia"]
+blood[Country_Region=="Democratic Republic of the Congo",Country_Region:="Congo (Kinshasa)"]
+blood[Country_Region=="Luxemberg",Country_Region:="Luxembourg"]
+blood[Country_Region=="Republic of Moldova",Country_Region:="Moldova"]
+
+bloodC<-merge(blood,countryData,by="Country_Region",all.x=TRUE)
+library(ggbiplot)
+bloodC<-bloodC[!is.na(Confirmed) & !is.na(popGE65),]
+bloodC<-bloodC[Deaths>=20,]
+bloodC[,regionF:=as.factor(Region)]
+library(psych)
+bloodC[,ApOpSprd:=Ap-Op]
+bloodC[,AOSprd:=(Ap+Am)-(Op+Om)]
+bloodC[,ApOSprd:=Ap-(Op+Om)]
+
+library(ggplot2)
+```
+
+## Principal Component Differentiation Of Blood Group Distribution
+
+Rick Wicklin did an interesting [Principal Component ("PC") analysis](https://blogs.sas.com/content/iml/2014/11/07/distribution-of-blood-types.html) of country ABO distributions.  I re-created the analysis which shows a PC differentiation of blood distributions results that match well with geographic regions (the elliptical labelling of region is done after the fact and is independent of the PC results). Note: Af=Africa, As=Asia, Au="Australian Group",Ca=Central America,Eu=Europe,La=Latin America,Me=Middle East, Na=North America. 
+
+```{r fig.width=10, fig.height=8}
+pcmod<-prcomp(bloodC[,3:8],center = T,scale. = T)
+ggbiplot(pcmod,labels = bloodC$Country_Region, ellipse = T, groups = bloodC$regionF)
+```
+
+We also know that Covid mortality seems to show significant variations by geographic region, with Asian mortality being notably low by comparison to other regions.
+
+```{r echo=FALSE}
+stats<-bloodC[,.(.N,mean(DeathPctPopGE65),median(DeathPctPopGE65),sd(DeathPctPopGE65)),by=regionF]
+colnames(stats)<-c("Region","N","Mean","Median","StdDev")
+
+stats[,Mean:=percent(Mean,digits = 2)]
+stats[,Median:=percent(Median,digits = 2)]
+stats[,StdDev:=percent(StdDev,digits = 2)]
+
+ggplot(bloodC[regionF=="Eu" | regionF=="As" | regionF=="La"], aes(DeathPctPopGE65, fill = regionF)) + geom_density(alpha = 0.2) + ggtitle("Covid Death Rate Distributions For Asia, Latin American and Europe")
+
+
+kable(stats, caption = "Country Statistics For Covid Deaths/Population 65 & Older By Region")
+```
+
+We can do a regression of country Covid death rates against the first two principal components.
+
+```{r}
+pcomps<-predict(pcmod,newdata = bloodC[,3:8])
+pcomps<-cbind(bloodC,pcomps)
+md<-lm(DeathPctPopGE65~PC1+PC2,data=pcomps)
+summary(md)
+```
+The adjusted R-squared of `r percent(summary(md)$adj.r.squared)` tells us that only a relatively small portion of the variability of country Covid death rates is explained by the first two principal components. You can see the Asian region is correlated with the lowest Covid death rate as it is highest in PC1 while simultaneoulsy being low in PC2.
+
+The principal component graph shows us that the key vector that differentiates the Asian region is its higher percentages of B+ blood types.  A simple regression using only the country percentage of B+ blood type versus country Covid death rate shows B+ to be a significant explanatory variable with essentially all of the explanatory power of the first two principal components. 
+
+```{r echo=F}
+stats<-bloodC[,.(.N,mean(Bp),median(Bp),sd(Bp)),by=regionF]
+colnames(stats)<-c("Region","N","Mean","Median","StdDev")
+library(formattable)
+stats[,Mean:=percent(Mean,digits = 2)]
+stats[,Median:=percent(Median,digits = 2)]
+stats[,StdDev:=percent(StdDev,digits = 2)]
+kable(stats,caption = "Country statistics on % B+ By Region")
+
+bmd<-lm(DeathPctPopGE65~Bp,data = bloodC)
+summary(bmd)
+```
+A simple regression using only the country percentage of B+ blood type versus country Covid death rate shows B+ to be a significant explanatory variable (B+ coefficient T-stat of `r round(summary(bmd)[["coefficients"]][, "t value"][2],2)`; Adj. R-squared of `r percent(summary(bmd)$adj.r.squared)`) with essentially all of the explanatory power of the first two principal components. 
+
+## Confirming data that B+ blood types may be protective?
+
+I am sure someone with more knowledge and better data sets (presumably clinical patient data) could do a better analysis to explore this question.  As a simple follow up, I looked at the US CDC death data by race.  Their data at <https://www.cdc.gov/nchs/nvss/vsrr/covid_weekly/index.htm#Race_Hispanic> shows Non-Hispanic Asians represent a little less than 50% of the Covid deaths that would be expected based on their proportion of the population.
+
+
+
+```{r echo=F}
+knitr::include_graphics("C://Users/whela/Dropbox/covid/CDCraceUSCovid.png")
+```
+
+## Simple Analysis Of Claim regarding A+ vs O Blood Group
+
+The article cited above in the Background section suggested patients with A+ blood were at higher risk than those in the O blood group.  At the country level **I did not find any statistically meaningful relationships between various versions of a country's A minus O spread and its Covid death rate. And in fact the coefficients ran in the opposite direction than expected.**
+
+
+```{r}
+bloodC[,ApOpSprd:=Ap-Op]
+bloodC[,AOSprd:=(Ap+Am)-(Op+Om)]
+bloodC[,ApOSprd:=Ap-(Op+Om)]
+summary(lm(DeathPctPopGE65~AOSprd, data = bloodC))
+summary(lm(DeathPctPopGE65~ApOpSprd, data = bloodC))
+summary(lm(DeathPctPopGE65~ApOSprd, data = bloodC))
+```
