@@ -29,7 +29,7 @@ Form 2 is easier to interpret, because Ti is interpreted in a straightforward wa
 
 ## Code used here
 
-My R code (included some additional analyses not shown here) is freely avaialble at [Github]<>
+My R code (included some additional analyses not shown here) is freely avaialble at [Github](https://github.com/whelanh/WorldValueSurveyRCode/blob/master/CovidGompertz.rmd)
 
 ## Obtain data from <https://covidtracking.com/api>
 
@@ -167,8 +167,8 @@ for (i in 1:length(items)) {
     nlsLM(cd ~ a * exp(-exp(-b * (d - Ti))),
           data = data1,
           start = list(
-            a = max(u1t$death),
-            b = 0.2,
+            a = max(u1t$death,na.rm = T),
+            b = 0.05,
             Ti = 20
           ))
   ob<-summary(modA)
@@ -179,7 +179,6 @@ for (i in 1:length(items)) {
   tm<-data.frame(seq(from=u1t$fstDate[1],to=(u1t$fstDate[1]+199),by="day"),gomEq2(ansGomp[i,2],ansGomp[i,3],ansGomp[i,4]))
   colnames(tm)<-c("Date","cumDeath")
   forcDat<-rbind(forcDat,tm)
-  
 }
 
 forcDat<-data.table(forcDat)
@@ -215,7 +214,7 @@ for (i in 1:length(items)) {
     nlsLM(cd ~ a * exp(-exp(-b * (d - Ti))),
           data = data1,
           start = list(
-            a = max(u1t$death),
+            a = max(u1t$death,na.rm = T),
             b = 0.2,
             Ti = 20
           ))
@@ -506,5 +505,5 @@ I suspect the total forecast using 50 individual state models is less stable (bu
 ```{r}
 aa<-head(sumTab[Date>=Sys.Date(),.(Date,round(dailyDeath,0))],30)
 colnames(aa)<-c("Date","Daily Covid Deaths")
-kable(aa, format = "html", table.attr = "style='width:30%;'")
+kable(aa, table.attr = "style='width:50%;'")
 ```
