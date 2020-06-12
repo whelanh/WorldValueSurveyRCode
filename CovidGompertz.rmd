@@ -1,0 +1,510 @@
+---
+title: "Gompertz Covid Forecast"
+author: "Hugh  Whelan"
+output:
+  prettydoc::html_pretty:
+    theme: tactile
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Updated on: `r Sys.Date()`
+
+## Background
+
+Good background on Gompertz curves can be found at <https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0178691&type=printable>.  A quick Youtube introduction is at <https://youtu.be/0ifT-7K68sk>.  R code used for an example application of tumor growth modelling is at <https://rpubs.com/mathetal/gompertz>. 
+
+A "Gompertz" equation can be written in two forms that **are equivalent from a data fitting perspective.** I look at two forms.  **Form 1:** **$$f(t) = a * exp(-b * exp(-c*t))$$**, the three parameters to be estimated are **a**, **b** and **c**. Term **t** represents time. Parameter **a** is the upper asymptote. In the context of Covid cumulative death data, one way parameter **a** can be conceptualized is as an estimate of the population with inherent characteristics that will result in their death from Covid.
+
+**Form 2:** **$$f(t) = a*exp(-exp(-b*(d-Ti)))$$**  In this form parameter **a** is the same (as we will see below), , **d** is the current day number, and parameter **b** is...
+
+> "...a growth-rate coefficient (which affects the slope), and Ti represents time at inflection. The Ti parameter shifts the growth curve horizontally without changing its shape and is therefore what
+is often termed a location parameter (whereas A and [b] are shape parameters)...." - Tjørve KMC, Tjørve E (2017) The use of Gompertz models in growth analyses, and new Gompertz-model approach: An addition to the
+Unified-Richards family. PLoS ONE 12(6): e0178691.
+
+Form 2 is easier to interpret, because Ti is interpreted in a straightforward way as the date at which the growth rate begins to slow.
+
+## Code used here
+
+My R code (included some additional analyses not shown here) is freely avaialble at [Github]<>
+
+## Obtain data from <https://covidtracking.com/api>
+
+Note: Total deaths from covidtracking.com tends to lag those reported by J. Hopkins website.
+
+```{r echo=FALSE, include=F}
+library(readr)
+library(data.table)
+library(formattable)
+library(socviz)
+library(maps)
+library(lubridate)
+library(urbnmapr)
+library(ggmap)
+library(dplyr)
+library(ggrepel)
+library(ggplot2)
+library(kableExtra)
+urlfile<- "https://covidtracking.com/api/v1/states/daily.csv"
+stLevel<-data.table(read.csv(url(urlfile)))
+stLevel[,Date:=as.Date(as.character(date),format="%Y%m%d")]
+
+# JHCounty data upates after 8 pm Eastern Time
+if (hour(Sys.time()) >21) {
+  dt <- Sys.Date()
+} else {
+  dt <- Sys.Date() - 1
+}
+  
+yest <- paste0(month(dt),"-",day(dt),"-",year(dt))
+# John Hopkins Daily Reports at County Level
+urlfile=paste0("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/",
+               format(as.Date(yest,format="%m-%d-%y"),"%m-%d-%Y"),".csv")
+JHcounty<-data.table(read_csv(url(urlfile)))
+stPop <- data.table(read.csv("c:/Users/whelanh/Dropbox/covid/over54popCounty.csv",colClasses = c("character","integer","integer")))
+strTmp = c('FIPS')
+stPop[, (strTmp) := lapply(.SD, as.numeric), .SDcols = strTmp]
+
+JHcounty<-data.table(merge(JHcounty,stPop,by = "FIPS",all.x = T))
+
+JHcounty[,deathPctge55:=Deaths/pop55andOver]
+# John Hopkins is using a different population aggregation for New York than the FIPS aggregation
+JHcounty[Admin2=="New York City",deathPctge55:=deathPctge55*((3257402/2)/5803210)]
+JHcounty[Admin2=="New York City",pop55andOver:=as.integer(Deaths/deathPctge55)]
+
+# create a numeric FIPS column
+JHcounty[,county_fips:=FIPS]
+strTmp = c('county_fips')
+JHcounty[, (strTmp) := lapply(.SD, as.numeric), .SDcols = strTmp]
+
+JHcounty[,id:=FIPS]
+
+US<-map_data("state")
+cd<-data.table(county_data)
+cd<-cd[,.(fips,land_area)]
+colnames(cd)<-c("county_fips","land_area")
+
+states_map <- map_data("state")
+JHcounty <- data.table(left_join(JHcounty,cd,by="county_fips"))
+# JHcounty[,ffPopDen:=pop55andOver/land_area]
+JHcounty[,ffPopDen:=(0.5*totPop)/land_area]
+
+######################################################
+# new section to get timing data
+Fifty<-JHcounty[Country_Region=="US" & pop55andOver>0,lapply(.SD, sum,na.rm=TRUE),by=Province_State,.SDcols=c("pop55andOver")] 
+pden <- JHcounty[Country_Region=="US" & pop55andOver>0,lapply(.SD, weighted.mean,w=pop55andOver,na.rm=TRUE),by=Province_State,.SDcols=c("ffPopDen")]
+
+stCode <- data.table(read.csv("c:/Users/whelanh/Dropbox/covid/stateCode.csv",colClasses = c("character","character")))
+Fifty <- merge(Fifty,stCode,by="Province_State",all.x = T)
+Fifty <- merge(Fifty,pden,by="Province_State",all.x = T)
+#######################################################
+
+
+states <- data.frame(state.center, state.abb, tolower(state.name))
+states <- states[!(states$state.abb %in% c("AK", "HI")),] # they aren't part of states_
+
+colnames(states) <- c("x","y","state","region")
+states_map <- map_data("state")
+
+# state map of days from fist inception (not shown on website)
+timeData<-merge(stLevel,Fifty,by="state")
+timeData[,deathPct55:=death/pop55andOver]
+fstDate<-timeData[deathPct55>4.786e-7,min(Date),by=state]
+fstDate[,sprTime:=V1-min(V1)]
+colnames(fstDate)<-c("state","fstDate","sprTime")
+
+states2<-data.table(merge(states,fstDate,by="state"))
+qqt <- ggplot()
+# borders
+qqt <- qqt + geom_map(data=states_map, map=states_map,
+                    aes(x=long, y=lat, map_id=region),
+                    color="white", size=0.15)
+# fills
+qqt <- qqt + geom_map(data=states2, map=states_map,
+                    aes(fill=as.numeric(sprTime), map_id=region),
+                    color="white", size=0.15)
+# labels
+qqt <- qqt + geom_text(data=states2, 
+                     aes(x=x, y=y, label=round(as.numeric(sprTime),0), group=NULL), size=2)
+# decent projection
+qqt <- qqt + coord_map("albers", lat0=39, lat1=45)
+qqt <- qqt + scale_fill_gradient2(low="#8FBC8F", mid="#ffff99", high="#FF0000")
+# better theme
+qqt <- qqt + labs(x=NULL, y=NULL)
+qqt <- qqt + theme_bw()
+qqt <- qqt + theme(panel.grid=element_blank())
+qqt <- qqt + theme(panel.border=element_blank())
+qqt <- qqt + theme(axis.ticks=element_blank())
+qqt <- qqt + theme(axis.text=element_blank())
+qqt <- qqt + labs(title="Days From 2/26 until Death >= 5 per 10MM Pop 55 and Over")
+
+timeData<-merge(timeData,fstDate,by="state")
+items<-unique(timeData$state)
+library(minpack.lm)
+
+gomEq2 <- function(a,b,c) {
+  as.numeric(a)*exp(-exp(-as.numeric(b)*(seq(1:200)-as.numeric(c))))
+}
+
+# Estimate Gompertz models for each individual state
+ansGomp<-data.frame(c(items),0,0,0)
+forcDat<-data.frame(min(timeData$fstDate),0)
+colnames(forcDat)<-c("Date","cumDeath")
+
+for (i in 1:length(items)) {
+  u1t <- timeData[state == items[i] & Date >= fstDate, ]
+  
+  u1t <- u1t[order(Date), ]
+  
+  data1 <- data.frame(seq(1:nrow(u1t)), u1t$death)
+  colnames(data1) <- c("d", "cd")
+  
+  #fit data to Gompertz model form 2
+  modA <-
+    nlsLM(cd ~ a * exp(-exp(-b * (d - Ti))),
+          data = data1,
+          start = list(
+            a = max(u1t$death),
+            b = 0.2,
+            Ti = 20
+          ))
+  ob<-summary(modA)
+  ansGomp[i,2]=ob$parameters[1]
+  ansGomp[i,3]=ob$parameters[2]
+  ansGomp[i,4]=ob$parameters[3]
+  # combine forecasts from all individual state models
+  tm<-data.frame(seq(from=u1t$fstDate[1],to=(u1t$fstDate[1]+199),by="day"),gomEq2(ansGomp[i,2],ansGomp[i,3],ansGomp[i,4]))
+  colnames(tm)<-c("Date","cumDeath")
+  forcDat<-rbind(forcDat,tm)
+  
+}
+
+forcDat<-data.table(forcDat)
+sumTab<-forcDat[,sum(cumDeath),by=Date]
+sumTab[,lagV1:=lag(V1,1)]
+sumTab[,dailyDeath:=V1-lagV1]
+
+colnames(ansGomp) <- c("state","a","b","Ti")
+Fifty <- merge(Fifty,ansGomp,by="state")
+# p50<-ggplot(Fifty,aes(b,Ti))+
+#   geom_point(color="red") + theme_bw() +
+#   geom_smooth(method = "loess") +
+#   geom_text_repel(aes(b,Ti, label = state)) +
+#   scale_x_continuous(labels=scales::percent) +
+#   labs(title="Gompertz growth coeff vs. Days to Inflection",
+#        y="Ti = days to growth inflection",
+#        x="Gompertz Growth Coefficient")
+
+#------------------------------------------------------------------------------
+# Estimate Gompertz deaths from all states based on data 10 days ago
+ansGomp2<-data.frame(c(items),0,0,0)
+
+for (i in 1:length(items)) {
+  u1t <- timeData[state == items[i] & Date >= fstDate & Date<Sys.Date()-10, ]
+  
+  u1t <- u1t[order(Date), ]
+  
+  data1 <- data.frame(seq(1:nrow(u1t)), u1t$death)
+  colnames(data1) <- c("d", "cd")
+  
+  #fit data to Gompertz model form 2
+  modA <-
+    nlsLM(cd ~ a * exp(-exp(-b * (d - Ti))),
+          data = data1,
+          start = list(
+            a = max(u1t$death),
+            b = 0.2,
+            Ti = 20
+          ))
+  ob<-summary(modA)
+  ansGomp2[i,2]=ob$parameters[1]
+  ansGomp2[i,3]=ob$parameters[2]
+  ansGomp2[i,4]=ob$parameters[3]
+}
+
+colnames(ansGomp2) <- c("state","a","b","Ti")
+#---------------------------------------------------------------------------
+
+timeData<-merge(timeData,ansGomp,by="state")
+timeData[,inflDate:=fstDate+Ti]
+final<-timeData[Date==max(Date),]
+final[,projDeathRate:=a/pop55andOver]
+
+p50<-ggplot(final,aes(b,Ti))+
+  geom_point(aes(size=projDeathRate),color="red") + theme_bw() +
+  geom_smooth(method = "loess") +
+  geom_text_repel(aes(b,Ti, label = state)) +
+  scale_x_continuous(labels=scales::percent) +
+  labs(title="Gompertz growth coeff vs. Days to Inflection",
+       y="Ti = days to growth inflection",
+       x="Gompertz Growth Coefficient")
+
+#------------PCA Analysis (not shown on website -- no major insights except regional clustering and weak relationship
+# to weighted mean county population density -----------------------------------------------------------------------
+final[,spdLag:=as.numeric(sprTime)]
+regn<-data.table(cbind(election$st,election$census,election$r_points))
+colnames(regn)<-c("state","region","TrumpMargin2018")
+regn[,TrumpMargin2018:=as.numeric(TrumpMargin2018)]
+final<-merge(final,regn,by="state")
+dfp<-data.frame(final[,c("projDeathRate","b","Ti")])
+rownames(dfp)<-final$state
+pcmod<-prcomp(dfp,center = T,scale. = T)
+
+grp<-as.factor(final$region[1:nrow(final)])
+library(factoextra)
+p60 <- fviz_pca_biplot(
+  pcmod,
+   repel = TRUE,
+  col.ind = grp,
+  # color by groups
+   addEllipses = TRUE,   # Concentration ellipses
+    ellipse.type = "confidence",
+   legend.title = "Regions"
+)
+
+dfp<-data.frame(final[,c("ffPopDen","b","Ti")])
+rownames(dfp)<-final$state
+pcmod<-prcomp(dfp,center = T,scale. = T)
+
+grp<-as.factor(final$region[1:nrow(final)])
+library(factoextra)
+p60 <- fviz_pca_biplot(
+  pcmod,
+   repel = TRUE,
+  col.ind = grp,
+  # color by groups
+   addEllipses = TRUE,   # Concentration ellipses
+    ellipse.type = "confidence",
+   legend.title = "Regions"
+)
+
+
+dpopdMod<-lm(projDeathRate~ffPopDen,data=final)
+
+p80<-ggplot(final,aes(log(ffPopDen),projDeathRate))+
+  geom_point(color="red") + theme_bw() +
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(log(ffPopDen),projDeathRate, label = state)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(title="Projected Death Rate vs. Population Density",
+       y="Proj. Deaths/ >55 Pop.",
+       x="55 and Older Population Density")
+
+
+p90<-ggplot(data = timeData[Date>"2020-02-25"], aes(x = Date, y = log(death), group = state)) +
+  geom_line(aes(color = state), size = 1) +
+  labs(title="Log(Cumulative Covid Deaths)",
+       y="Log(Cum. Covid Deaths)",
+       x="Date",
+       subtitle = "Data from https://covidtracking.com/")
+#------------------------End of PCA Analysis------------------------------------------------------
+
+#look at CDC actual date of death data vs. covidtracking reported date data.
+urlfile<-"https://data.cdc.gov/resource/r8kw-7aab.csv"
+cdc<-data.table(read.csv(url(urlfile)))
+cdc <- cdc[state=="United States",]
+cdc[,Date:=as.Date(end_week)]
+cdc[,totalCovid:=cumsum(covid_deaths)]
+library(lubridate)
+cdc[,wkNum:=week(Date)]
+```
+
+## Aggregate to US level and Fit Equation Forms 1 and 2:
+
+```{r}
+u1<-stLevel[,lapply(.SD, sum,na.rm=TRUE),by=Date,.SDcols=c("death","positive","total","positiveIncrease","totalTestResultsIncrease","deathIncrease","hospitalized","hospitalizedCurrently")] 
+
+u1<-u1[order(Date),]
+# Omit fragmentary early data when cum deaths < 50
+u11<-u1[death>50,]
+
+data1<- data.frame(seq(1:nrow(u11)),u11$death)
+colnames(data1)<-c("d","cd")
+
+library(easynls)
+#fit data to the Gompertz model form 1
+mod10<-nlsfit(data1, model=10, start = c(a=110000,b=8,c=0.1))
+mod10
+
+#fit data to Gompertz model form 2
+library(minpack.lm)
+modA<-nlsLM(cd~a*exp(-exp(-b*(d-Ti))),data=data1,start=list(a=100000,b=4,Ti=20)) 
+summary(modA)
+
+data2<- data.frame(cdc[,wkNum],cdc[,totalCovid])
+colnames(data2)<-c("wkNum","totalCovid")
+#fit CDC date of death weekly data
+#omit last 2 weeks of data because of significant lags in reporting to the CDC
+modCDC<-nlsLM(totalCovid~a*exp(-exp(-b*(wkNum-Ti))),data=data2[1:(nrow(data2)-2),],start=list(a=100000,b=0.1,Ti=8))
+summary(modCDC)
+cdcMod<-unlist(summary(modCDC))
+
+```
+
+## Plot Covid Tracking Cum Covid Death Data vs. Fitted Curve
+
+```{r}
+gomp<-nlsplot(data1, model = 10, start = c(a = 100000, b = 8, c = .1), 
+         xlab = "Days since Deaths>50, Gompertz Eq. " , ylab = "Cum Covid Deaths", position = 1)
+```
+
+## Plot CDC Date of Death Cum Covid Death vs. Fitted Curve
+
+```{r}
+plot(cdc$Date,cdc$totalCovid,xlab="Date", ylab="Cumulative Covid Deaths", main="CDC Date of Death Data",sub="Red line = Gompertz Estimate")
+forc<-cdcMod$parameters1*exp(-exp(-cdcMod$parameters2*(cdc$wkNum-cdcMod$parameters3)))
+lines(cdc$Date,forc,col='red')
+```
+
+CDC date of death data Gompertz parameters indicates a similar peak between 4/11/2020 and 4/18/2020, and an estimated total of `r comma(cdcMod$parameters1,digits=0)` Covid deaths. The issue with CDC date of death data is the significant lag of reporting which gets revised upward over the next 5 - 7 weeks.
+
+## Plot Daily Deaths vs. Implied By Fitted Curve
+
+```{r echo=F}
+gomEq <- function(t) {
+  as.numeric(unlist(mod10)[2])*exp(-as.numeric(unlist(mod10)[3])*exp(-as.numeric(unlist(mod10)[4])*t))
+}
+
+dlyForecast<-gomEq(seq(2,200))-gomEq(seq(1,199))
+plot(seq(2,(nrow(u1[death>51,])+1)),u1[death>51,deathIncrease],xlab="Days Since Deaths>50",
+                                                                      ylab="Daily Covid Deaths",
+                                                                      main="Red line = Gompertz Estimate", sub  = "Blue line = Graph/Network Equation")
+lines(seq(2:(length(dlyForecast)+1)),dlyForecast,col='red')
+
+tst<-u1[death>51,]
+tst[,x:=seq(1,nrow(tst))]
+modN<-nlsLM(deathIncrease~(K∗(x)^q)∗exp(−(x)/z),data=tst,start=list(K=200,q=0.9,z=8))
+# summary(modN)
+# nMod<-unlist(summary(modN))
+# plot(tst[,x],tst[,deathIncrease])
+lines(tst[,x],predict(modN),col='blue')
+zz<-predict(modN,newdata=data.frame(x=seq(1,300)))
+```
+
+Another parameterized equation form that some have proposed to model infections is a "Graph Equation" or "Network Equation" (see <https://twitter.com/JasonC88766481/status/1269991092507652098>). These equations are used to model something propagated through a network of cluster nodes. One proposed Graph Equation fit to daily deaths is $$K*(t)^q * exp(-(t)/z)$$ where t is time, and K, q and z are estimated parameters. This equation is fit to **daily deaths**.
+
+This can be compared to the first derivative of a Gompertz curve fit to cumulative deaths vs. time.  The first derivative of Form 2 of the Gompertz equation is $$a*b*exp(-exp(-b*(t-To))-b*(t-To))$$, where again t is time and parameters a, b, and To are estimated.  
+
+While these equations are different, they are both 3 parameter equations with declining growth over time. As shown on the graph above, they produce very similar fits to daily deaths. The total forecasted cumulative number of Covid deaths from the Gompertz equation is `r comma(summary(modA)$parameters[1],digits=0)`, while the forecasted cumulative from the Graph equation is `r comma(sum(zz[which(zz>1)]),digits=0)`. 
+
+
+## How Stable Has The Cumulative Death Estimate Been?
+
+
+```{r}
+#Look at estimates of parameter a over the last 30 days at 5 day intervals
+priorDates<-data.frame(seq((nrow(data1)-40),nrow(data1),5))
+priorDates$CumEstimate<-0
+priorDates$AdjRSquared<-0
+priorDates$ParamB<-0
+priorDates$ParamC<-0
+for (i in 1:nrow(priorDates)) {
+  mod10<-nlsfit(data1[1:priorDates[i,1],], model=10, start = c(a=90000,b=8,c=0.05))
+  priorDates$CumEstimate[i]<-unlist(mod10)[2]
+  priorDates$AdjRSquared[i]<-unlist(mod10)[8]
+  priorDates$ParamB[i]<-unlist(mod10)[3]
+  priorDates$ParamC[i]<-unlist(mod10)[4]  
+  
+}
+priorDates[,1]<-priorDates[,1]-max(priorDates[,1])
+priorDates[,2]<-comma(round(as.numeric(priorDates[,2]),0),digits = 0)
+priorDates[,3]<-percent(priorDates[,3])
+priorDates[,4]<-comma(priorDates[,4],2)
+priorDates[,5]<-comma(priorDates[,5],4)
+colnames(priorDates) <- c("Days Ago","Cum Covid Death Est.","Adj. R-Squared","Parameter b", "Parameter c")
+priorDates$pctChangeCumCovid<-percent(max(priorDates$`Cum Covid Death Est.`)/priorDates$`Cum Covid Death Est.`-1,digits = 1)
+priorDates
+```
+
+We can see that cumulative Covid death estimate using this technique has changed by `r priorDates[3,6]` over the last 30 days (since `r Sys.Date() - 30`) despite all fits having high adjusted R-squared values. The estimate does appear to be converging however with smaller changes as time passes.  This seems consistent with the virus spreading more widely throughout the US, ultimately providing a more stable national estimate.
+
+
+For comparison the widely cited IHME Univ. of Washington model  (<https://ihmecovid19storage.blob.core.windows.net/archive/2020-04-29/ihme-covid19.zip>) forecasted 72,000 Covid deaths on April 29, and then revised their forecast to 134,000 on May 4th. 
+
+
+```{r}
+mda<-data.frame(seq((nrow(data1)-40),nrow(data1),5))
+mda$CumEstimate<-0
+mda$ParamB<-0
+mda$ParamTo<-0
+for (i in 1:nrow(mda)) {
+  moda<-summary(nlsLM(cd~a*exp(-exp(-b*(d-To))),data=data1[1:mda[i,1],],start=list(a=90000,b=0.05,To=30)))
+  mda$CumEstimate[i]<-moda$parameters[1]
+  mda$ParamB[i]<-moda$parameters[2]
+  mda$ParamTo[i]<-moda$parameters[3]  
+}
+mda[,1]<-mda[,1]-max(mda[,1])
+mda[,2]<-comma(round(as.numeric(mda[,2]),0),digits = 0)
+mda[,3]<-percent(mda[,3])
+mda[,4]<-comma(mda[,4],1)
+
+colnames(mda) <- c("Days Ago","Cum Covid Death Est.","Parameter b", "Parameter Ti")
+mda$pctChangeCumCovid<-percent(max(mda$`Cum Covid Death Est.`)/mda$`Cum Covid Death Est.`-1,digits = 1)
+mda
+```
+
+
+### Progression of Estimates For Final Total US Covid Deaths
+```{r}
+plot(mda$`Days Ago`,mda$`Cum Covid Death Est.`,type='b',ylab="Final Total Covid Death Est.",xlab="Est. Made X Days Ago",col='red')
+```
+
+### Comparison of Estimated Cumulative Covid Death Curves: Now vs. Est. 40 Days Ago.
+```{r}
+
+a1<-nlsLM(cd~a*exp(-exp(-b*(d-To))),data=data1[1:(nrow(data1)-40),],start=list(a=90000,b=0.05,To=30))
+a2<-nlsLM(cd~a*exp(-exp(-b*(d-To))),data=data1,start=list(a=90000,b=0.05,To=30))
+
+plot(predict(a2,newdata = data1),type='l',col='blue',xlab = "Days Since Deaths>50",ylab="Cum. Covid Deaths", main="Blue line = Curr. Gompertz Est., Red Line = Est. Made 40 days ago")
+lines(predict(a1,newdata=data1),col='red')
+```
+
+## Interpretation of Change in Form 2 Equation Parameters Over Time
+
+Form 2 model parameters have changed in the following ways:
+ 
+ * Parameter **a** -- the cumulative Covid death forecast has increased over time.
+ * The death growth rate estimate, parameter **b** has declined.
+ * **Ti** - The date of the growth rate inflection point was extended from `r u1[which(death==51),Date]+as.numeric(mda[1,4])` to `r u1[which(death==51),Date]+as.numeric(mda[9,4])`.
+ 
+It is difficult to relate these changes to increasing (and now decreasing) degrees of lockdown/social distancing.  While the slowing growth rate estimate and the extension of the inflection date could be seen as compatible with increasing lockdown implementations, the growing estimate of cumulative deaths doesn't fit a lockdown hypothesis.
+
+I believe a better hypothesis is that the initial death estimates were dominated by the large number of deaths coming from dense, highly populated cities (e.g. in NY and NJ). The initial Gompertz estimates would have reflected the growth and "carrying capacity" in that sub-system.  Since then Covid has spread to interior states/more rural & suburban areas. For example, **on April 8th 49% of the US population aged 55 and older lived in counties with 5 or fewer reported Covid deaths.  On June 2nd, that percentage had dropped to approximately 15%.** 
+
+>**Thus from Covid's perspective, it found a "larger container" as it expanded beyond larger cities. That larger container was inherently harder to spread in.  Finding the larger container meant cumulative death estimates would rise, growth rates would decline, and the date of growth rate inflection was extended.**
+
+More generally, each state's experience (as shown below) has been unique in terms of:
+
+1. The timing of infection
+2. Population density cluster(s) and how connected they are
+3. Proximity to adjacent states that may have high/low infection rates
+4. How well connected the state is to international and other domestic cities
+5. They may also be different along socio-economic/general health dimensions as well
+
+```{r echo=F}
+p90
+```
+
+We can fit Gompertz curves to each state individually.  The chart below shows the resulting dispersion of coefficients for Form 2 of the Gompertz equation. Term b, the growth coefficient estimates and Ti (days to growth inflection point) and the x-y coordinates. Term a, the asymptote, is used to calculate the  "projDeathRate" which is term a divided by that state's population aged 55 and older.
+
+```{r echo=F}
+p50
+```
+
+
+As suspected given what we know about the timing and distribution of Covid deaths in the US, **curves for New York and New Jersey have a higher growth parameter than one estimated on all other states combined.** Similarly **the growth inflection date for New York and New Jersey is sooner than ones estimated for states with lower population densities**
+
+Finally, **the total Covid death estimate is slightly higher by combining all individual state Gompertz curves vs. the estimate from the single All-US model** estimate (`r comma(sum(ansGomp$a),0)` vs. `r comma(mod10$Parameters[[1]][1],0)`).
+
+I suspect the total forecast using 50 individual state models is less stable (but perhaps more accurate) than a single US model.  Ten days ago the total Covid death estimate using individual state models was `r comma(sum(ansGomp2$a),0)` (`r percent(sum(ansGomp2$a)/sum(ansGomp$a)-1,digits=0)` different).
+
+## Appendix A: Sum of individual state models "forecast" of Daily Deaths
+
+```{r}
+aa<-head(sumTab[Date>=Sys.Date(),.(Date,round(dailyDeath,0))],30)
+colnames(aa)<-c("Date","Daily Covid Deaths")
+kable(aa, format = "html", table.attr = "style='width:30%;'")
+```
