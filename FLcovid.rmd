@@ -1,0 +1,624 @@
+---
+title: "FloridaCovid"
+author: "Hugh Whelan"
+output: 
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r echo=FALSE, include=FALSE}
+library(readr)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(reshape2)
+library(scales)
+library(stringi)
+library(lubridate)
+library(urbnmapr)
+library(tidyverse)
+library(maps)
+library(viridis)
+library(DT)
+library(zoo)
+library(downloader)
+library(kableExtra)
+library(knitr)
+library(formattable)
+library(socviz)
+library(imager)
+library(MASS)
+library(Hmisc)
+library(smoother)
+library(HDInterval)
+library(ggExtra)
+library(jsonlite)
+library(xlsx)
+
+
+#nyt death by county
+url <-
+  "https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv"
+nyt <-   data.table(read_csv(url(url), skip = 0))
+nyt[, date := as.Date(date)]
+nytf <- nyt[state == "Florida", ]
+
+
+lagDat<-nyt[state=="Florida",.(sum(cases),sum(deaths)),by=date]
+lagDat[,dCase:=V1-lag(V1,1)]
+lagDat[,dDeath:=V2-lag(V2,1)]
+
+Samp<-lagDat[date>"2020-03-15",]
+Samp<-Samp[order(date),]
+
+ansMat<-data.table()
+
+for (i in 30:nrow(Samp)) {
+  ccfObj<-ccf(Samp[(i-29):i,dCase],Samp[(i-29):i,dDeath],30)
+  m<-data.table(cbind(ccfObj$acf,ccfObj$lag))
+  m<-cbind(m[V2<=0,],rep(Samp[i,date],30))
+  ansMat<-rbind(ansMat,m)
+}
+
+colnames(ansMat)<-c("acf","lag","Date")
+ansMat[,date:=as.factor(format(Date,"%m-%d"))]
+ansMM2<-ansMat[Date>Sys.Date()-20,mean(acf),by=lag]
+
+ l3<-ggplot(data=ansMM2, aes(x=lag, y=V1)) +
+   geom_line() +
+   theme_bw()  +
+   labs(y="Correlation",
+        x="Lag (Days)",
+        title="Florida: Mean 30 Day Cross-Correlation Between Daily Deaths and Cases",
+        subtitle=paste("30 Day Periods Ending From ",Sys.Date()-20,"to now. Data: NY Times Covid Database"))
+
+ bestLag<-ansMM2[V1==max(V1),lag]*-1
+
+
+ Samp2<-Samp[date>Sys.Date()-50,]
+ lagz <- ggplot(Samp2, aes(x = date))
+ lagz <- lagz + geom_line(aes(x=date+bestLag, y= dCase, colour = paste("Daily Cases Fwd ",bestLag)))
+ 
+#   # adding the relative humidity data, transformed to match roughly the range of the temperature
+  lagz <- lagz + geom_line(aes(x=date, y = dDeath*20, colour = "Daily Deaths"))
+# 
+#   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
+#   # and, very important, reverting the above transformation
+  lagz <- lagz + scale_y_continuous(sec.axis = sec_axis(~./20, name = "Daily Deaths"))
+# 
+#   # modifying colours and theme options
+  lagz <- lagz + scale_colour_manual(values = c("blue", "red"))
+ lagz <- lagz + labs(y = "New Cases",
+                 x = "Date",
+                 colour = "Florida",
+                 title = "Cases Projected Forward Based On Strongest Cross-Correlation")
+  lagz <- lagz + theme(legend.position = c(0.2, 0.9))
+
+
+fl2018dBym <-
+  data.table(
+    read.xlsx(
+      "c://Users/whelanh/Downloads/FL2018byMonth.xlsx",
+      sheetName = "Sheet1",
+      startRow = 3,
+      header = F
+    )
+  )
+fl2019dBym <-
+  data.table(
+    read.xlsx(
+      "c://Users/whelanh/Downloads/FL2019byMonth.xlsx",
+      sheetName = "Sheet1",
+      startRow = 3,
+      header = F
+    )
+  )
+fl2020dBym <-
+  data.table(
+    read.xlsx(
+      "c://Users/whelanh/Downloads/FL2020byMonth.xlsx",
+      sheetName = "Sheet1",
+      startRow = 3,
+      header = F
+    )
+  )
+
+tTable <- function(x) {
+  an <- t(x[2:nrow(x), 3:14])
+  nms <- as.vector(x[2:nrow(x), 1])
+  colnames(an) <- nms$X1
+  an
+}
+
+f2019 <- tTable(fl2019dBym)
+f2020 <- tTable(fl2020dBym)
+f2018 <- tTable(fl2018dBym)
+
+# Adust deaths for population growth to compare to 2020
+grAdjBase <- (f2018 * 1.012 ^ 2 + f2019 * 1.012) / 2
+delt2020 <- f2020 - grAdjBase
+marMaysum <- data.frame(colSums(delt2020[3:5, ]))
+marMaysum$county <- tolower(rownames(marMaysum))
+
+grAdjBaseSum<-data.frame(colSums(grAdjBase[3:5, ]))
+grAdjBaseSum$county<-tolower(rownames(grAdjBaseSum))
+
+f2020BaseSum<-data.frame(colSums(f2020[3:5, ]))
+f2020BaseSum$county<-tolower(rownames(f2020BaseSum))
+
+nytMay <- data.frame(nytf[date == "2020-05-31", ])
+nytMay$county <- tolower(nytMay$county)
+
+compTab<-merge(grAdjBaseSum,f2020BaseSum,by="county")
+compTab<-merge(compTab,marMaysum,by="county")
+compTab <- merge(compTab, nytMay, by = "county")
+ansTab <- compTab[, c(1:4, 9)]
+colnames(ansTab) <- c("county","2019-18adjBase","2020AllDeaths", "2020vs2018-19Delta", "Covid Deaths")
+ansTab$`2019-18adjBase` <- round(ansTab$`2019-18adjBase`,0)
+ansTab$`2020vs2018-19Delta` <- round(ansTab$`2020vs2018-19Delta`, 0)
+ansTab$nonCovidDelta <-
+  ansTab$`2020vs2018-19Delta` - ansTab$`Covid Deaths`
+ansTab <- rbind(c("TOTAL", colSums(ansTab[2:6])),ansTab)
+
+
+fl2019dByAge <-
+  data.table(
+    read.xlsx(
+      "c://Users/whelanh/Downloads/FL2019byAge.xlsx",
+      sheetName = "Sheet1",
+      startRow = 3,
+      header = F
+    )
+  )
+
+colnames(fl2019dByAge)<-c("Region","Total","0-<1","1-4","5-9","10-14","15-19","20-24","25-34","35-44","45-54","55-64","65-74","75-84","85+","Unk")
+
+fl2020dByAge <-
+  data.table(
+    read.xlsx(
+      "c://Users/whelanh/Downloads/FL2020byAge.xlsx",
+      sheetName = "Sheet1",
+      startRow = 3,
+      header = F
+    )
+  )
+
+labvec<-c("Region","Total","0-<1","1-4","5-9","10-14","15-19","20-24","25-34","35-44","45-54","55-64","65-74","75-84","85+","Unk")
+colnames(fl2020dByAge)<-labvec
+
+fbyA19<-data.table(t(fl2019dByAge[Region=="FLORIDA",3:15]))
+fbyA19[,pctTot:=V1/sum(V1)]
+fbyA19[,year:="2019AllDeaths"]
+fbyA19[,Age:=labvec[3:15]]
+fbyA19<-fbyA19[,c("Age","year","pctTot")]
+
+fbyA20<-data.table(t(fl2020dByAge[Region=="FLORIDA",3:15]))
+fbyA20[,pctTot:=V1/sum(V1)]
+fbyA20[,year:="2020AllDeathsYTD"]
+fbyA20[,Age:=labvec[3:15]]
+fbyA20<-fbyA20[,c("Age","year","pctTot")]
+
+
+
+# JHCounty data upates after 8 pm Eastern Time
+if (hour(Sys.time()) > 21) {
+  dt <- Sys.Date()
+} else {
+  dt <- Sys.Date() - 1
+}
+
+dt<-Sys.Date()-1
+
+yest <- paste0(month(dt), "-", day(dt), "-", year(dt))
+# John Hopkins Daily Reports at County Level
+urlfile = paste0(
+  "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/",
+  format(as.Date(yest, format = "%m-%d-%y"), "%m-%d-%Y"),
+  ".csv"
+)
+JHcounty <- data.table(read_csv(url(urlfile)))
+
+
+url2 = "https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
+# #
+flDat <- data.table(read_csv(url(url2), skip = 0))
+flDat[, eDat := as.Date(EventDate)]
+flDat[, cDat := as.Date(Case1)]
+flDat[, medAge := median(Age, na.rm = T), by = eDat]
+flDat <- flDat[order(eDat), ]
+a <- flDat[, .N, by = eDat]
+a <- a[order(eDat), ]
+
+
+a <- flDat[, .N, by = eDat]
+a <- a[order(eDat), ]
+
+flDat[Age<30,ageCat:="29 or less"]
+flDat[Age>=30 & Age<50,ageCat:="30-49"]
+flDat[Age>=50 & Age < 65,ageCat:="50-64"]
+flDat[Age>=65 & Age < 75, ageCat:="65-74"]
+flDat[Age>=75 & Age < 85, ageCat:="75-84"]
+flDat[Age>=85, ageCat:="85 or more"]
+
+flDat[Hospitalized=="YES",hosCat:="Hospitalized"]
+flDat[Hospitalized!="YES" & EDvisit=="YES",hosCat:="ED Only"]
+flDat[is.na(hosCat),hosCat:="Other"]
+
+cDeathbyAge<-flDat[Died=="Yes",.N, by=Age_group]
+cDeathbyAge[,pctTot:=N/sum(N)]
+
+
+allCcomb<-data.table(rbind(fbyA19,fbyA20))
+allCcomb[Age=="1-4",Age:="01-4"]
+allCcomb[Age=="5-9",Age:="05-9"]
+
+# allCausTab<-data.table(cbind(labvec[3:15],fbyA19$pctTot,fbyA20$pctTot))
+# colnames(allCausTab)<-c("Age","2019AllCause%","2020YTDAllCause%")
+
+allCcht<-ggplot(allCcomb, aes(fill=year, y=pctTot, x=Age)) + 
+    geom_bar(position="dodge", stat="identity")
+
+allCcomb[Age=="0-<1" | Age=="01-4"| Age=="05-9" | Age=="10-14" | Age=="15-19" | Age=="20-24",Age_group:="15-24 years"]
+allCcomb[Age=="25-34",Age_group:="25-34 years"]
+allCcomb[Age=="35-44",Age_group:="35-44 years"]
+allCcomb[Age=="45-54",Age_group:="45-54 years"]
+allCcomb[Age=="55-64",Age_group:="55-64 years"]
+allCcomb[Age=="65-74",Age_group:="65-74 years"]
+allCcomb[Age=="75-84",Age_group:="75-84 years"]
+allCcomb[Age=="85+",Age_group:="85+ years"]
+
+newTab<-allCcomb[,sum(pctTot),by=c("year","Age_group")]
+cDeathbyAge[,year:="CovidDeaths2020"]
+colnames(newTab)<-c("year","Age_group","pctTot")
+newTab2<-rbind(newTab,cDeathbyAge[,c("year","Age_group","pctTot")])
+
+allCcht2<-ggplot(newTab2, aes(fill=year, y=pctTot, x=Age_group)) + 
+    geom_bar(position="dodge", stat="identity") +
+     scale_y_continuous(labels=scales::percent) +
+  labs(  y = "% of All Deaths",
+  x = "Age Group",
+  colour = "Florida",
+  title = "FL Distribution of All Deaths and Covid Deaths",
+  subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
+)
+
+xx <-
+  flDat[EDvisit == "YES" &
+          Hospitalized != "YES" &
+          eDat >= "2020-02-29" , .N, by = c("eDat", "ageCat")]
+
+xx<-xx[order(eDat,ageCat),]
+
+xxcht<- ggplot(xx, aes(x = eDat, y = N))+
+  geom_col(aes(fill = ageCat), width = 0.7) +
+  scale_color_gradientn(colours = rainbow(6)) +
+  labs(  y = "ED Visit = YES but Hospitalized = NO",
+  x = "Event Date",
+  colour = "Florida",
+  title = "ED Visit, but not Hospitalized"
+)
+
+xxx <-
+  flDat[Hospitalized == "YES" &
+          eDat >= "2020-02-29" , .N, by = c("eDat", "ageCat")]
+
+xxx<-xxx[order(eDat,ageCat),]
+
+xxxcht<- ggplot(xxx, aes(x = eDat, y = N))+
+  geom_col(aes(fill = ageCat), width = 0.7) +
+  scale_color_gradientn(colours = rainbow(6)) +
+  labs(  y = "Hospitalized = YES",
+  x = "Event Date",
+  colour = "Florida",
+  title = "Age Grouping Of Those Hospitalized w/Covid"
+)
+
+dd <-
+  flDat[Died == "Yes" &
+          eDat >= "2020-02-29" , .N, by = c("eDat", "ageCat")]
+
+dd<-dd[order(eDat,ageCat),]
+dd2<-dd[ageCat=="85 or more" | ageCat=="75-84" | ageCat=="65-74",sum(N),by=eDat]
+dd3<-dd[,sum(N),by=eDat]
+dd2<-merge(dd2,dd3,by="eDat")
+dd2[,pctGE65:=V1.x/V1.y]
+dd2[,Roll7pctGE65:=rollmean(pctGE65,7,align = "right",na.pad = T)]
+
+dd<-merge(dd,dd2,by="eDat")
+
+ddcht<- ggplot(dd, aes(x = eDat, y = N))+
+  geom_col(aes(fill = ageCat), width = 0.7) +
+  scale_color_gradientn(colours = rainbow(6)) +
+  labs(  y = "Died = Yes",
+  x = "Event Date",
+  colour = "Florida",
+  title = "Age Grouping Of Covid Deaths",
+  subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
+)
+
+ddcht2 <- ggplot(dd,aes(x=eDat,y=Roll7pctGE65)) + geom_line() +
+   scale_y_continuous(labels=scales::percent) +
+  labs(  y = "7 Day Mean % All Deaths",
+  x = "Event Date",
+  title = "% of Covid Deaths From Those Aged 65 and Older",
+  subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
+)
+
+
+ddd <-
+  flDat[Died == "Yes" &
+          eDat >= "2020-02-29" , .N, by = c("eDat", "hosCat")]
+
+dddcht<- ggplot(ddd, aes(x = eDat, y = N))+
+  geom_col(aes(fill = hosCat), width = 0.7) +
+  scale_color_gradientn(colours = rainbow(6)) +
+  labs(  y = "Died",
+  x = "Event Date",
+  colour = "Florida",
+  title = "Deaths By Hospitalization Status",
+    subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
+)
+
+ddd2<-ddd[hosCat=="Hospitalized",sum(N),by=eDat]
+ddd3<-ddd[,sum(N),by=eDat]
+ddd2<-merge(ddd2,ddd3,by="eDat")
+ddd2[,pctHospitalized:=V1.x/V1.y]
+ddd2[,Roll7pctHospitalized:=rollmean(pctHospitalized,7,align = "right",na.pad = T)]
+
+ddd<-merge(ddd,ddd2,by="eDat")
+
+dddcht2 <- ggplot(ddd,aes(x=eDat,y=Roll7pctHospitalized)) + geom_line() +
+   scale_y_continuous(labels=scales::percent) +
+  labs(  y = "7 Day Mean % All Deaths",
+  x = "Event Date",
+  title = "% of Covid Deaths That Were Hospitalized",
+  subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
+)
+
+
+nowDat <- flDat[eDat >= (max(eDat) - 14), .N, by = c("County", "eDat")]
+widDat <- spread(nowDat, eDat, N)
+widDat <- widDat[order(-widDat[, 13]), ]
+widDat <- widDat[1:8, ]
+tcnt <- list(widDat$County)
+plDat <- nowDat[nowDat$County %in% widDat$County, ]
+plDat[, County := as.factor(County)]
+
+p90 <-
+  ggplot(data = plDat, aes(
+    x = eDat,
+    y = N,
+    group = County,
+    colour = County
+  )) +
+  geom_line() +
+  labs(title = "Cases From FL DOH In Select Counties",
+       y = "Cases",
+       x = "Event Date")
+
+yest2 <- flDat[eDat == max(eDat), ]
+
+mage <- flDat[, .(.N, median(Age, na.rm = T)), by = eDat]
+mage[order(eDat), ]
+
+mage <- mage[eDat > "2020-02-29", ]
+# plot(mage$eDat,mage$V1,main = "Median Age of Florida Covid Cases",xlab = "Event Date", ylab = "Median Age", sub = "Data: https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv")
+#
+
+mz <- ggplot(mage, aes(x = eDat))
+mz <-
+  mz + geom_line(aes(x = eDat, y = V2 , colour = "Median Age Covid Cases"))
+
+#   # adding the relative humidity data, transformed to match roughly the range of the temperature
+mz <-
+  mz + geom_line(aes(x = eDat, y = N / 60, colour = "Daily Cases")) +
+  theme_bw()
+#   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
+#   # and, very important, reverting the above transformation
+mz <-
+  mz + scale_y_continuous(sec.axis = sec_axis( ~ . * 60, name = "Daily Cases"))
+#
+#   # modifying colours and theme options
+mz <- mz + scale_colour_manual(values = c("blue", "red"))
+mz <- mz + labs(
+  y = "Age",
+  x = "Event Date",
+  colour = "Florida",
+  subtitle = "Data: https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
+)
+mz <- mz + theme(legend.position = c(0.3, 0.5))
+
+cage <- flDat[, .(.N, sum(Age > 64, na.rm = T)), by = eDat]
+cage[, pctGE65 := V2 / N]
+cage[order(eDat), ]
+
+#
+dage <- flDat[Died == "Yes", .N, by = eDat]
+dage <- merge(dage, cage, by = "eDat")
+dage[, pctDied := N.x / N.y]
+#
+male <- flDat[Gender == "Male", .N, by = eDat]
+
+dage <- merge(male, dage, by = "eDat")
+dage <- dage[order(eDat), ]
+dage[, pctMale := N / N.y]
+dage2<-flDat[Died=="Yes" & Gender=="Male",.N,by=eDat]
+colnames(dage2)<-c("eDat","mDead")
+dage2<-merge(dage2,dage,by="eDat")
+dage2[,deathPctMale:=mDead/N.x]
+# #
+
+# #
+jnk <- flDat[eDat > Sys.Date() - 7, median(Age, na.rm = T), by = County]
+# jnk<-yest2[,.N,by=County]
+#
+colnames(jnk) <- c("Admin2", "Cases")
+jnk[Admin2 == "Dade", Admin2 := "Miami-Dade"]
+jnk <- merge(jnk, JHcounty, by = "Admin2", all.y = F)
+jnk[, id := as.character(FIPS)]
+# #
+#   jnk[,id:=as.character(id)]
+jnk <- merge(jnk, county_map, by = "id", all.y = F)
+jnk <- jnk[Province_State == "Florida", ]
+jnk[, x := (max(long) + min(long)) / 2, by = FIPS]
+jnk[, y := (max(lat) + min(lat)) / 2, by = FIPS]
+
+
+
+library(urbnthemes)
+
+qjnk <- jnk %>%
+  ggplot(mapping = aes(long, lat, group = group, fill = Cases)) +
+  geom_polygon(color = "black", size = .25) +
+  scale_fill_gradient2(labels = scales::comma,
+                       guide = guide_colorbar(title.position = "top")) +
+  geom_text(data = jnk,
+            aes(
+              x = x,
+              y = y,
+              label = round(Cases, 0),
+              group = NULL
+            ),
+            size = 3) +
+  # coord_map(projection = "albers", lat0 = 25, lat1 = 31) +
+  theme(legend.title = element_text(),
+        legend.key.width = unit(.5, "in")) +
+  labs(fill = "Median Age",
+       title = "Median Age of Covid Cases From Last 7 Days By County",
+       subtitle = "Blank Counties=No Data") +
+  theme_urbn_map()
+
+dage <- dage[eDat > "2020-02-29", ]
+
+pz <- ggplot(dage, aes(x = eDat))
+pz <-
+  pz + geom_line(aes(
+    x = eDat,
+    y = 100 * pctGE65 ,
+    colour = "% Cases >= 65 yrs old"
+  ))
+
+
+pz <-
+  pz + geom_line(aes(
+    x = eDat,
+    y = 100 * pctDied,
+    colour = "% All Deaths/All Cases"
+  )) +
+  theme_bw()  +
+  scale_y_continuous(labels = scales::comma_format())
+#   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
+#   # and, very important, reverting the above transformation
+pz <- pz + scale_colour_manual(values = c("blue", "red"))
+pz <- pz + labs(y = "%",
+                x = "Event Date",
+                colour = "Florida")
+pz <- pz + theme(legend.position = c(0.2, 0.9))
+
+
+```
+
+
+Updated on `r Sys.Date()`
+
+## Median Age of Covid Cases by Event Date
+
+```{r echo=FALSE}
+mz
+```
+
+## Median Age of Cases From Last 7 Days By County
+
+```{r}
+qjnk
+```
+
+## % of Cases Aged >= 65 Years Old vs Case Death Rate
+
+```{r}
+pz
+```
+
+## ED-only and Hospitalization Demographics
+
+```{r echo=FALSE,fig.width=10, fig.height=8, fig.fullwidth=TRUE}
+xxcht
+
+xxxcht
+```
+
+
+## Age Demographics Of FL Covid Deaths
+
+```{r echo=FALSE,fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=F}
+ddcht
+
+ddcht2
+```
+
+## Hospitalization Status of FL Covid Deaths
+
+```{r echo=FALSE,fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
+dddcht
+
+dddcht2
+```
+
+
+## Covid Death and Cases Percentages By Gender
+
+Most recent 4 weeks yield erratic values for percentage of death because of the small number of deaths. 
+
+```{r}
+dage2<-dage2[eDat>"2020-03-01",]
+
+plot(dage2$eDat,rollmean(100*dage2$deathPctMale,7,na.pad = T,align = "right"),type='l',ylab = "% Male",xlab="Event Date",
+     main = "Red line = 7 day Avg. % Of Cases", sub = "Black line = 7 day Avg. % of Deaths")
+ lines(dage2$eDat,rollmean(100*dage2$pctMale,7,na.pad = T,align = "right"),col='red')
+ abline(h=50)
+```
+
+## Case Trend In Select Counties
+
+```{r}
+p90
+```
+
+## Distribution of Death by Age: From All Causes vs. Covid Deaths Alone
+
+```{r echo=FALSE,fig.width=14, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
+allCcht2
+```
+
+## Statistically Derived Lag Between Daily Cases and Daily Deaths
+
+Using the [New York Times Covid data](https://github.com/nytimes/covid-19-data), an autocorrelation between daily cases and daily deaths suggests the most powerful lag is `r -ansMM2[V1==max(V1),lag]` days between reported cases and subsequent deaths.
+
+```{r}
+l3
+```
+
+The chart below plots cases plotted ahead in time by this lag.  **However significant departures between the two series can happen if new cases show very different demographics** (i.e., the dramatic decline in the median age of new Covid cases which seems to be confirmed by changes in hospitalization-ED patterns shown above) **than prior cases.**
+
+```{r fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
+
+lagz
+```
+
+
+## March - May All Deaths vs. Covid Deaths
+
+Florida publishes preliminary total deaths from all causes by month at this [link](http://www.flpublichealth.com/VSprov/rdPage.aspx?rdReport=ProvReports&radReport=T2&drpYear=2020). We can compare the total of all deaths from March through May in 2020 to those from prior years (June data is not yet complete).  The table below subtracts the average of the population growth adjusted March - May deaths from a 2018-2019 baseline (I assume population has grown by 1.2% by year) from 2020's March - May deaths. This is a gross "Excess Death" number.  The Covid Deaths are from the New York Times [database](https://github.com/nytimes/covid-19-data) through May 31.  The last column of the table subtracts the Covid deaths from the Excess Deaths to estimate Excess Deaths not attributable to Covid.
+
+Totals for the state are shown on the first row.
+
+```{r excessDeath}
+kable(ansTab)
+```
