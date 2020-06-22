@@ -51,6 +51,7 @@ nyt[, date := as.Date(date)]
 nytf <- nyt[state == "Florida", ]
 
 
+# Section to look at lags between reported daily cases and future daily deaths
 lagDat<-nyt[state=="Florida",.(sum(cases),sum(deaths)),by=date]
 lagDat[,dCase:=V1-lag(V1,1)]
 lagDat[,dDeath:=V2-lag(V2,1)]
@@ -101,6 +102,7 @@ ansMM2<-ansMat[Date>Sys.Date()-20,mean(acf),by=lag]
                  title = "Cases Projected Forward Based On Strongest Cross-Correlation")
   lagz <- lagz + theme(legend.position = c(0.2, 0.9))
 
+# Section to look at All Casuses Deaths in 2020 vs 2018/2019 Population Adjusted Baseline and 2020 Covid Deaths  
 
 fl2018dBym <-
   data.table(
@@ -168,6 +170,8 @@ ansTab$nonCovidDelta <-
 ansTab <- rbind(c("TOTAL", colSums(ansTab[2:6])),ansTab)
 
 
+# Section to look at age composition of deaths in All Causes 2019 & 2020 and 2020-Covid
+
 fl2019dByAge <-
   data.table(
     read.xlsx(
@@ -225,6 +229,8 @@ urlfile = paste0(
 )
 JHcounty <- data.table(read_csv(url(urlfile)))
 
+# REad in FL DOH data
+
 
 url2 = "https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
 # #
@@ -259,9 +265,6 @@ allCcomb<-data.table(rbind(fbyA19,fbyA20))
 allCcomb[Age=="1-4",Age:="01-4"]
 allCcomb[Age=="5-9",Age:="05-9"]
 
-# allCausTab<-data.table(cbind(labvec[3:15],fbyA19$pctTot,fbyA20$pctTot))
-# colnames(allCausTab)<-c("Age","2019AllCause%","2020YTDAllCause%")
-
 allCcht<-ggplot(allCcomb, aes(fill=year, y=pctTot, x=Age)) + 
     geom_bar(position="dodge", stat="identity")
 
@@ -288,6 +291,8 @@ allCcht2<-ggplot(newTab2, aes(fill=year, y=pctTot, x=Age_group)) +
   title = "FL Distribution of All Deaths and Covid Deaths",
   subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
 )
+
+# Look at characteristics of hospitalization
 
 xx <-
   flDat[EDvisit == "YES" &
@@ -319,6 +324,8 @@ xxxcht<- ggplot(xxx, aes(x = eDat, y = N))+
   colour = "Florida",
   title = "Age Grouping Of Those Hospitalized w/Covid"
 )
+
+# Look at characteristics of Covid Death by Age
 
 dd <-
   flDat[Died == "Yes" &
@@ -382,6 +389,7 @@ dddcht2 <- ggplot(ddd,aes(x=eDat,y=Roll7pctHospitalized)) + geom_line() +
   subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
 )
 
+# Select county trends in cases
 
 nowDat <- flDat[eDat >= (max(eDat) - 14), .N, by = c("County", "eDat")]
 widDat <- spread(nowDat, eDat, N)
@@ -409,8 +417,7 @@ mage <- flDat[, .(.N, median(Age, na.rm = T)), by = eDat]
 mage[order(eDat), ]
 
 mage <- mage[eDat > "2020-02-29", ]
-# plot(mage$eDat,mage$V1,main = "Median Age of Florida Covid Cases",xlab = "Event Date", ylab = "Median Age", sub = "Data: https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv")
-#
+
 
 mz <- ggplot(mage, aes(x = eDat))
 mz <-
@@ -443,7 +450,8 @@ cage[order(eDat), ]
 dage <- flDat[Died == "Yes", .N, by = eDat]
 dage <- merge(dage, cage, by = "eDat")
 dage[, pctDied := N.x / N.y]
-#
+
+# Look at Covid cases and deaths by gender
 male <- flDat[Gender == "Male", .N, by = eDat]
 
 dage <- merge(male, dage, by = "eDat")
@@ -471,7 +479,7 @@ jnk[, x := (max(long) + min(long)) / 2, by = FIPS]
 jnk[, y := (max(lat) + min(lat)) / 2, by = FIPS]
 
 
-
+# Map median age of recent cases by county
 library(urbnthemes)
 
 qjnk <- jnk %>%
@@ -527,6 +535,10 @@ pz <- pz + theme(legend.position = c(0.2, 0.9))
 
 
 Updated on `r Sys.Date()`
+
+## R Code
+
+All code used to produce this site can be found on [Github](https://github.com/whelanh/WorldValueSurveyRCode/blob/master/FLcovid.rmd)
 
 ## Median Age of Covid Cases by Event Date
 
@@ -585,6 +597,7 @@ plot(dage2$eDat,rollmean(100*dage2$deathPctMale,7,na.pad = T,align = "right"),ty
  abline(h=50)
 ```
 
+
 ## Case Trend In Select Counties
 
 ```{r}
@@ -622,3 +635,4 @@ Totals for the state are shown on the first row.
 ```{r excessDeath}
 kable(ansTab)
 ```
+
