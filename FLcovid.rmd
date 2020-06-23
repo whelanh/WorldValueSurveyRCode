@@ -530,6 +530,81 @@ pz <- pz + labs(y = "%",
                 colour = "Florida")
 pz <- pz + theme(legend.position = c(0.2, 0.9))
 
+#------------------Section on Gompertz & Network equation fit to FL data --------------------------
+
+library(minpack.lm)
+
+gomEq2 <- function(a,b,c) {
+  as.numeric(a)*exp(-exp(-as.numeric(b)*(seq(1:200)-as.numeric(c))))
+}
+
+# Use case date because it deaths probably occurred after Event Date (first contact)
+gomDat<-flDat[Died=="Yes",.N,by=cDat]
+gomDat<-gomDat[order(cDat),]
+gomDat[,cumDeath:=cumsum(N)]
+
+fstDate<-gomDat[cumDeath>9,min(cDat)]
+
+u1t <- gomDat[cDat >= fstDate, ]
+data1 <- data.frame(seq(1:nrow(u1t)), u1t$cumDeath)
+colnames(data1) <- c("d", "cd")
+
+Gompfit <- function(d1,u1) {  
+  #fit data to Gompertz model form 2
+  modA <-
+    nlsLM(cd ~ a * exp(-exp(-b * (d - Ti))),
+          data = d1,
+          start = list(
+            a = max(u1$cumDeath,na.rm = T),
+            b = 0.05,
+            Ti = 20
+          ))
+  summary(modA)
+}
+  ob <- Gompfit(data1,u1t)
+  
+      #fit network graph to FL daily death data
+  u1t[,x:=1:nrow(u1t)]
+  colnames(u1t)<-c("cDat","deathIncrease","cumDeath","x")
+
+  modN <- nlsLM(
+    deathIncrease ~ (K∗(x) ^ q)∗exp(−(x) / z),
+    data = u1t,
+    start = list(K = 200,
+                 q = 0.9,
+                 z = 8)
+  )
+  
+  netTotal<-sum(predict(modN,newdata=data.frame(x=seq(1,300))))
+  
+  library(easynls)
+  #fit data to the Gompertz model form 1
+  mod10<-nlsfit(data1, model=10, start = c(a=3400,b=8,c=0.1))
+  mod10
+
+
+  # Compare FL DOH model to covidTracking.com data model fit
+  # urlfile<- "https://covidtracking.com/api/v1/states/daily.csv"
+  # stLevel<-data.table(read.csv(url(urlfile)))
+  # stLevel[,Date:=as.Date(as.character(date),format="%Y%m%d")]
+  # stLevel<-stLevel[state=="FL",]
+  # stLevel<-stLevel[order(Date),]
+  # fdatCT<-stLevel[,c("Date","deathIncrease")]
+  # fdatCT[,cumDeath:=cumsum(deathIncrease)]
+  # u1t <- fdatCT[cumDeath>9, ]
+  # data1 <- data.frame(seq(1:nrow(u1t)), u1t$cumDeath)
+  # colnames(data1) <- c("d", "cd")
+  # 
+  # obCT<-Gompfit(data1,u1t)  
+
+  #fit network graph to FL daily death datatail
+
+
+
+
+#-------------------------------------------------------------------------------------------------
+
+
 
 ```
 
@@ -586,7 +661,7 @@ dddcht2
 
 ## Covid Death and Cases Percentages By Gender
 
-Most recent 4 weeks yield erratic values for percentage of death because of the small number of deaths. 
+Most recent 4 weeks yield **erratic values** for percentage of death because of the small number of deaths. 
 
 ```{r}
 dage2<-dage2[eDat>"2020-03-01",]
@@ -606,9 +681,46 @@ p90
 
 ## Distribution of Death by Age: From All Causes vs. Covid Deaths Alone
 
+The 2019 and 2020 All Causes age distribution is from [Public Health data](http://www.flpublichealth.com/VSprov/rdPage.aspx?rdReport=ProvReports&radReport=T2&drpYear=2020). The 2020 All Cause data is only through March -- so the 2020 All Cause percent distribution does not fully reflect the impact of Covid deaths this year.  Covid deaths are up to date to the current date.
+
 ```{r echo=FALSE,fig.width=14, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
 allCcht2
+
+gdeath<-round(ob$parameters[1],0)
+ndeath<- round(netTotal,0)
+currdeath<-round(max(u1t$cumDeath),0)
+library(formattable)
 ```
+
+## Gompertz & Network Graph fits to FL Covid Death data
+
+Both Gompertz and Network graph equations have been proposed as good functional fits to model deaths as an infection spreads within a system (like the state of Florida). If you are interested in the topic, I have a [separate site](https://rpubs.com/whelanh/CovidGompertz) that uses these to look at US Covid death data.
+
+I am not aware of good FL data that separately dates infection versus death.  FL's Event Date is date of earliest contact and is unlikely to be the death date.  I use Case Date as a proxy for actual date of death. Both equations provide good fits to FL cumulative death (for Gompertz) and daily deaths (for Network Graph).
+
+The Gompertz equation projects total deaths of **`r comma(gdeath,digits=0)`**.  The Network Graph equation projects total deaths of **`r comma(ndeath,digits=0)`** deaths.  These both compare to currently reported total deaths of **`r comma(currdeath,digits=0)`**. This would imply that FL has already experienced approximately `r percent(currdeath/ndeath,digits = 0)` of total projected deaths. The chart below summarizes the Gompertz equation fit to FL's cumulative Covid death curve:
+
+```{r}
+nlsplot(data1,model = 10,start = c(a = 3400, b = 8, c = .1),xlab = "Days since Deaths>=10, Gompertz Eq. ",ylab = "FL Cum Covid Deaths",position = 1)
+u1tRows<-nrow(u1t)
+
+gomEq <- function(t) {
+  as.numeric(unlist(mod10)[2])*exp(-as.numeric(unlist(mod10)[3])*exp(-as.numeric(unlist(mod10)[4])*t))
+}
+
+forc<- gomEq(c((u1tRows+2):(u1tRows+6)))-gomEq(c((u1tRows+1):(u1tRows+5)))
+```
+
+Both equations "fit" to FL's daily deaths is shown below.  Although the actual daily death data fluctuates quite a bit, the "smoothed" projected daily deaths using the Gompertz equation for the next 5 days is: `r round(forc,0)`.
+
+```{r}
+dlyForecast<-gomEq(seq(2,200))-gomEq(seq(1,199))
+plot(seq(2,(nrow(u1t)+1)),u1t$deathIncrease,xlab="Days Since Deaths>50",ylab="Daily Covid Deaths",main="Red line = Gompertz Estimate", sub="Blue line = Graph/Network Equation")
+lines(seq(2:(length(dlyForecast)+1)),dlyForecast,col='red')
+lines(u1t$x,predict(modN),col='blue')
+
+```
+
 
 ## Statistically Derived Lag Between Daily Cases and Daily Deaths
 
