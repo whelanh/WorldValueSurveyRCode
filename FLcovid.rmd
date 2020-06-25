@@ -41,7 +41,129 @@ library(HDInterval)
 library(ggExtra)
 library(jsonlite)
 library(xlsx)
+library(gsheet)
 
+
+# Google mobility data
+urlfile="https://www.gstatic.com/covid19/mobility/Global_Mobility_Report.csv"
+goog<-data.table(read_csv(url(urlfile),col_types = list(col_character(),col_character(),col_character(),col_character(),
+                                                        col_character(),col_character(),
+                                                        col_date(),col_integer(),col_integer(),col_integer(),
+                                                        col_integer(),col_integer(),col_integer(),col_integer())))
+
+goog[,state:=as.factor(sub_region_1)]
+stGoog<-goog[is.na(sub_region_2),]
+
+stGoog<-stGoog[state=="Florida" | state=="New York" | state=="California",]
+stGoog<-stGoog[order(sub_region_1,date),]
+
+g1<-ggplot(stGoog, aes(x=date, y=retail_and_recreation_percent_change_from_baseline, group=state,color=state)) +
+  scale_shape_manual(values=1:nlevels(stGoog$state)) +
+  # geom_line()+
+  geom_point() +
+  theme_bw()  +
+  labs(y="Retail/Recreation Decline From Baseline",
+       x="Date",
+       title="Google Mobility Data",
+       subtitle="Data: https://www.gstatic.com/covid19/mobility/Global_Mobility_Report.csv")
+
+stGoog[,sevDayWork:=rollmean(workplaces_percent_change_from_baseline,7,align="right",na.pad = T),by=state]
+stGoog[,sevDayHome:=rollmean(residential_percent_change_from_baseline,7,align="right",na.pad = T),by=state]
+
+g2<-ggplot(stGoog[date>"2020-03-05",], aes(x=date, y=sevDayWork, group=state,color=state)) +
+  scale_shape_manual(values=1:nlevels(stGoog$state)) +
+  # geom_line()+
+  geom_point() +
+  theme_bw()  +
+  labs(y="Workplaces Decline From Baseline",
+       x="Date",
+       title="Google Mobility Data: 7-Day Rolling Mean",
+       subtitle="Data: https://www.gstatic.com/covid19/mobility/Global_Mobility_Report.csv")
+
+g3<-ggplot(stGoog, aes(x=date, y=residential_percent_change_from_baseline, group=state,color=state)) +
+  scale_shape_manual(values=1:nlevels(stGoog$state)) +
+  geom_line()+
+  geom_point() +
+  theme_bw()  +
+  labs(y="Residential Change From Baseline",
+       x="Date",
+       title="Google Mobility Data: 7-Day Rolling Mean",
+       subtitle="Data: https://www.gstatic.com/covid19/mobility/Global_Mobility_Report.csv")
+
+
+# flu data https://gis.cdc.gov/grasp/fluview/mortality.html
+
+# The population of Florida in 2019 was 21,477,737, a 1.1% increase from 2018. The population of Florida in 2018 was 21,244,317, a 1.34% increase from # 2017. The population of Florida in 2017 was 20,963,613, a 1.7% increase from 2016. The population of Florida in 2016 was 20,613,477, a 2% increase # from 2015.
+multply<-c(1.011*1.0134*1.017*1.02,1.011*1.0134*1.017,1.011*1.0134,1.011,1)
+fluDat<-data.table(read.csv("C://Users/whelanh/Downloads/State_Florida_2015-20_Data.csv"))
+fluDat[,totDeath:=as.numeric(gsub(",","",TOTAL.DEATHS))]
+fluDat[SEASON=="2015-16",adjDeath:=multply[1]*totDeath]
+fluDat[SEASON=="2016-17",adjDeath:=multply[2]*totDeath]
+fluDat[SEASON=="2017-18",adjDeath:=multply[3]*totDeath]
+fluDat[SEASON=="2018-19",adjDeath:=multply[4]*totDeath]
+fluDat[SEASON=="2019-20",adjDeath:=totDeath]
+fluDat[,season:=paste0(substr(SEASON,1,2),substr(SEASON,6,7))]
+lastWkNum<-23
+deets<-fluDat[WEEK<lastWkNum,.(sum(totDeath),sum(adjDeath)),by=SEASON]
+
+excessDeaths<-max(deets$V2)-mean(deets$V2[1:4])
+
+
+allDthPlot<-ggplot(data=fluDat[WEEK<lastWkNum,],aes(x=WEEK,y=adjDeath,group=season,colour=season)) +
+  geom_line() +
+    labs(y = "Weekly All Deaths",
+                 x = "Week Number",
+                 colour = "Florida",
+                 title = "FLorida: Deaths From All Causes vs. Population-Adjusted Prior Years",
+         subtitle = paste("Through Week", lastWkNum," Data: https://gis.cdc.gov/grasp/fluview/mortality.html"))  
+
+
+# long term care data from @kerpen and @nosmhnmh
+ltcDat<-data.table(gsheet2tbl("https://docs.google.com/spreadsheets/d/1ETm51GayRjlnoaRVtUOWfkolEeAQZ-zPhXkCbVe4_ik/edit#gid=1417804764"))
+
+ltcDat2<-ltcDat[3:nrow(ltcDat),1:9]
+colnames(ltcDat2)<-as.character(ltcDat[2,1:9])
+ltcDat2[,date:=as.Date(paste0(ltcDat2$X1,"-2020"),"%d-%b-%Y")]
+ltcDat2<-ltcDat2[!is.na(date)]
+ltcDat2[,ltc:=as.numeric(gsub(",", "", LTC))]
+ltcDat2[,tot:=as.numeric(gsub(",", "", Total))]
+ltcDat2[,ltcDaily:=ltc-lag(ltc,1)]
+ltcDat2[,totDaily:=tot-lag(tot,1)]
+ltcDat2[,pctLtcDaily:=ltcDaily/totDaily]
+ltcDat2[,pctLtcCum:=ltc/tot]
+
+cumLTCdeath<-ltcDat2[date==max(date),pctLtcCum]
+
+ltc<- ggplot(ltcDat2) + 
+  geom_col(aes(x = date, y = ltcDaily), size = 1, color = "white", fill = "darkblue",group=1) +
+  geom_line(aes(x = date, y = rollmean(ltcDaily,7,align = "right",na.pad = T)), size = 1.5, color="green", group = 2) + 
+  geom_line(aes(x = date, y = 100*pctLtcDaily), size = 1, color="red", group = 3) + 
+  scale_y_continuous(sec.axis = sec_axis(~.,name = "% of Daily Total Covid Deaths")) +
+  scale_colour_manual(values = c("blue", "red","green")) +
+    labs(y = "Daily Deaths",
+                 x = "Date",
+                 colour = "Florida",
+                 title = "Daily Long Term Care Covid Deaths (Blue bars and green 7 day average - left axis)",
+         subtitle = "Red line = Daily LTC Covid death share of Daily Covid deaths - right axis")  
+ 
+url<-"https://data.cdc.gov/api/views/r8kw-7aab/rows.csv?accessType=DOWNLOAD"
+cdcDat<-data.table(read.csv(url))
+
+cdcDat<-cdcDat[State=="Florida",]
+
+cdcDat[,pctCov:=COVID.19.Deaths/Total.Deaths]
+cdcDat[,endDate:=as.Date(End.Week,"%m/%d/%Y")]
+cdcDat<-cdcDat[!is.na(pctCov),]
+cdcDat[,PneumInfluez:=Influenza.Deaths+(Pneumonia.Deaths - Pneumonia.and.COVID.19.Deaths)]
+
+ny3<- ggplot(cdcDat, aes(x = endDate, y = pctCov)) + geom_line(color="darkblue") + geom_point(color="red") +
+    scale_y_continuous(labels=scales::percent) +
+  labs(y="Weekly Covid Deaths/Weekly All Deaths %",
+       x="Date",
+       title="Weekly Covid Deaths As A Percent of Weekly Total FL Deaths",
+       subtitle = "Data:https://data.cdc.gov/api/views/r8kw-7aab/rows.csv?accessType=DOWNLOAD")
+
+lastCDCpct<-cdcDat[endDate==max(endDate),pctCov]
 
 #nyt death by county
 url <-
@@ -50,11 +172,12 @@ nyt <-   data.table(read_csv(url(url), skip = 0))
 nyt[, date := as.Date(date)]
 nytf <- nyt[state == "Florida", ]
 
-
 # Section to look at lags between reported daily cases and future daily deaths
 lagDat<-nyt[state=="Florida",.(sum(cases),sum(deaths)),by=date]
 lagDat[,dCase:=V1-lag(V1,1)]
 lagDat[,dDeath:=V2-lag(V2,1)]
+lagDat[,d7Case:=rollmean(dCase,7,align="right",na.pad = T)]
+lagDat[,d7Death:=rollmean(dDeath,7,align="right",na.pad = T)]
 
 Samp<-lagDat[date>"2020-03-15",]
 Samp<-Samp[order(date),]
@@ -62,7 +185,7 @@ Samp<-Samp[order(date),]
 ansMat<-data.table()
 
 for (i in 30:nrow(Samp)) {
-  ccfObj<-ccf(Samp[(i-29):i,dCase],Samp[(i-29):i,dDeath],30)
+  ccfObj<-ccf(Samp[(i-29):i,d7Case],Samp[(i-29):i,d7Death],30)
   m<-data.table(cbind(ccfObj$acf,ccfObj$lag))
   m<-cbind(m[V2<=0,],rep(Samp[i,date],30))
   ansMat<-rbind(ansMat,m)
@@ -70,38 +193,43 @@ for (i in 30:nrow(Samp)) {
 
 colnames(ansMat)<-c("acf","lag","Date")
 ansMat[,date:=as.factor(format(Date,"%m-%d"))]
-ansMM2<-ansMat[Date>Sys.Date()-20,mean(acf),by=lag]
+ansMM2<-ansMat[Date>Sys.Date()-40,mean(acf),by=lag]
 
  l3<-ggplot(data=ansMM2, aes(x=lag, y=V1)) +
    geom_line() +
    theme_bw()  +
    labs(y="Correlation",
         x="Lag (Days)",
-        title="Florida: Mean 30 Day Cross-Correlation Between Daily Deaths and Cases",
-        subtitle=paste("30 Day Periods Ending From ",Sys.Date()-20,"to now. Data: NY Times Covid Database"))
+        title="Florida: Mean 30 Day Cross-Correlation Between 7 Day Avg. Daily Deaths and Cases",
+        subtitle=paste("30 Day Periods Ending From ",Sys.Date()-40,"to now. Data: NY Times Covid Database"))
 
  bestLag<-ansMM2[V1==max(V1),lag]*-1
 
 
- Samp2<-Samp[date>Sys.Date()-50,]
+ Samp2<-Samp[date>Sys.Date()-100,]
  lagz <- ggplot(Samp2, aes(x = date))
- lagz <- lagz + geom_line(aes(x=date+bestLag, y= dCase, colour = paste("Daily Cases Fwd ",bestLag)))
+ lagz <- lagz + geom_line(aes(x=date+bestLag, y= d7Case, colour = paste("7-Day Avg Daily Cases Fwd ",bestLag)))
  
 #   # adding the relative humidity data, transformed to match roughly the range of the temperature
-  lagz <- lagz + geom_line(aes(x=date, y = dDeath*20, colour = "Daily Deaths"))
+  lagz <- lagz + geom_line(aes(x=date, y = d7Death*20, colour = "7 Day Avg. Daily Deaths"))
 # 
 #   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
 #   # and, very important, reverting the above transformation
-  lagz <- lagz + scale_y_continuous(sec.axis = sec_axis(~./20, name = "Daily Deaths"))
+  lagz <- lagz + scale_y_continuous(sec.axis = sec_axis(~./20, name = "7 Day Avg. Daily Deaths"))
 # 
 #   # modifying colours and theme options
   lagz <- lagz + scale_colour_manual(values = c("blue", "red"))
- lagz <- lagz + labs(y = "New Cases",
+ lagz <- lagz + labs(y = "7 Day Avg.New Cases",
                  x = "Date",
                  colour = "Florida",
                  title = "Cases Projected Forward Based On Strongest Cross-Correlation")
   lagz <- lagz + theme(legend.position = c(0.2, 0.9))
 
+  
+# flDat[Died=="Yes",death:=1]
+# flDat[is.na(death),death:=0]
+# flDat[,cumDeath:=cumsum(death)]
+  
 # Section to look at All Casuses Deaths in 2020 vs 2018/2019 Population Adjusted Baseline and 2020 Covid Deaths  
 
 fl2018dBym <-
@@ -232,11 +360,18 @@ JHcounty <- data.table(read_csv(url(urlfile)))
 # REad in FL DOH data
 
 
-url2 = "https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
-# #
-flDat <- data.table(read_csv(url(url2), skip = 0))
-flDat[, eDat := as.Date(EventDate)]
-flDat[, cDat := as.Date(Case1)]
+# url2 = "https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
+# flDat<- data.table(read_csv(url(url2), skip = 0))
+# flDat[, eDat := as.Date(EventDate)]
+# flDat[, cDat := as.Date(Case1)]
+
+# Section for when DOH site not working and get from https://covid19-usflibrary.hub.arcgis.com/search?owner=USFDHHC.GIS
+url2<-"C:\\Users/whelanh/Downloads/Florida_COVID19_06242020_Case_Line_Data.csv"
+flDat<- data.table(read_csv(url2, skip = 0))
+flDat[, eDat := as.Date(EventDate,"%m/%d/%Y")]
+flDat[, cDat := as.Date(Case_,"%m/%d/%Y")]
+#------------------------------------------------------------------------------------------------------------------------
+
 flDat[, medAge := median(Age, na.rm = T), by = eDat]
 flDat <- flDat[order(eDat), ]
 a <- flDat[, .N, by = eDat]
@@ -421,11 +556,11 @@ mage <- mage[eDat > "2020-02-29", ]
 
 mz <- ggplot(mage, aes(x = eDat))
 mz <-
-  mz + geom_line(aes(x = eDat, y = V2 , colour = "Median Age Covid Cases"))
+  mz + geom_line(aes(x = eDat, y = V2 , colour = "Median Age Covid Cases (left axis)"))
 
 #   # adding the relative humidity data, transformed to match roughly the range of the temperature
 mz <-
-  mz + geom_line(aes(x = eDat, y = N / 60, colour = "Daily Cases")) +
+  mz + geom_line(aes(x = eDat, y = N / 60, colour = "Daily Cases (right axis)")) +
   theme_bw()
 #   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
 #   # and, very important, reverting the above transformation
@@ -546,7 +681,7 @@ gomDat[,cumDeath:=cumsum(N)]
 fstDate<-gomDat[cumDeath>9,min(cDat)]
 
 u1t <- gomDat[cDat >= fstDate, ]
-data1 <- data.frame(seq(1:nrow(u1t)), u1t$cumDeath)
+data1 <- data.frame(seq(1:nrow(u1t)),u1t$cumDeath)
 colnames(data1) <- c("d", "cd")
 
 Gompfit <- function(d1,u1) {  
@@ -579,7 +714,7 @@ Gompfit <- function(d1,u1) {
   
   library(easynls)
   #fit data to the Gompertz model form 1
-  mod10<-nlsfit(data1, model=10, start = c(a=3400,b=8,c=0.1))
+  mod10<-nlsfit(data1, model=10, start = c(a=3400,b=8,c=.1))
   mod10
 
 
@@ -658,6 +793,15 @@ dddcht
 dddcht2
 ```
 
+## Covid Long Term Care Deaths
+
+This data is hand compiled by Twitter users @kerpen and @nosmhnmh in their excellent [spreadsheet](https://docs.google.com/spreadsheets/d/1ETm51GayRjlnoaRVtUOWfkolEeAQZ-zPhXkCbVe4_ik/edit#gid=435667374) covering LTC deaths in the US. Their Florida data is sourced from the FL DOH.
+
+As of `r max(ltcDat2$date)`, **the cumulative total of long term care Covid deaths comprises `r percent(cumLTCdeath,digits=1)` of the cumulative number of all FL Covid deaths.**
+
+```{r echo=FALSE,fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
+suppressWarnings(ltc)
+```
 
 ## Covid Death and Cases Percentages By Gender
 
@@ -701,7 +845,7 @@ I am not aware of good FL data that separately dates infection versus death.  FL
 The Gompertz equation projects total deaths of **`r comma(gdeath,digits=0)`**.  The Network Graph equation projects total deaths of **`r comma(ndeath,digits=0)`** deaths.  These both compare to currently reported total deaths of **`r comma(currdeath,digits=0)`**. This would imply that FL has already experienced approximately `r percent(currdeath/ndeath,digits = 0)` of total projected deaths. The chart below summarizes the Gompertz equation fit to FL's cumulative Covid death curve:
 
 ```{r}
-nlsplot(data1,model = 10,start = c(a = 3400, b = 8, c = .1),xlab = "Days since Deaths>=10, Gompertz Eq. ",ylab = "FL Cum Covid Deaths",position = 1)
+nlsplot(data1,model = 10,start = c(a = 3400, b = 8, c = .1),xlab = "Days since Cum Deaths>=10, Gompertz Eq. ",ylab = "FL Cum Covid Deaths",position = 1)
 u1tRows<-nrow(u1t)
 
 gomEq <- function(t) {
@@ -711,11 +855,11 @@ gomEq <- function(t) {
 forc<- gomEq(c((u1tRows+2):(u1tRows+6)))-gomEq(c((u1tRows+1):(u1tRows+5)))
 ```
 
-Both equations "fit" to FL's daily deaths is shown below.  Although the actual daily death data fluctuates quite a bit, the "smoothed" projected daily deaths using the Gompertz equation for the next 5 days is: `r round(forc,0)`.
+Both equations "fit" to FL's daily deaths is shown below.  Although the actual daily death data fluctuates quite a bit, the "smoothed" projected daily deaths using the Gompertz equation for the next 5 days is: `r round(forc,0)`.  **Note: these daily numbers should be compared to the FL DOH data by Event Date**, NOT covidtracking.com which does not assign them to their correct dates.
 
 ```{r}
 dlyForecast<-gomEq(seq(2,200))-gomEq(seq(1,199))
-plot(seq(2,(nrow(u1t)+1)),u1t$deathIncrease,xlab="Days Since Deaths>50",ylab="Daily Covid Deaths",main="Red line = Gompertz Estimate", sub="Blue line = Graph/Network Equation")
+plot(seq(2,(nrow(u1t)+1)),u1t$deathIncrease,xlab="Days Since Cum Deaths>=10",ylab="Daily Covid Deaths",main="Red line = Gompertz Estimate", sub="Blue line = Network Graph Equation")
 lines(seq(2:(length(dlyForecast)+1)),dlyForecast,col='red')
 lines(u1t$x,predict(modN),col='blue')
 
@@ -724,19 +868,45 @@ lines(u1t$x,predict(modN),col='blue')
 
 ## Statistically Derived Lag Between Daily Cases and Daily Deaths
 
-Using the [New York Times Covid data](https://github.com/nytimes/covid-19-data), an autocorrelation between daily cases and daily deaths suggests the most powerful lag is `r -ansMM2[V1==max(V1),lag]` days between reported cases and subsequent deaths.
+Using the [New York Times Covid data](https://github.com/nytimes/covid-19-data), an autocorrelation between 7-day mean daily cases and 7-day mean daily deaths suggests the most powerful lag is `r -ansMM2[V1==max(V1),lag]` days between reported cases and subsequent deaths. Seven day smoothing is used to eliminate the strong day of the week effect because of subdued reporting on weekends.
 
 ```{r}
 l3
 ```
 
-The chart below plots cases plotted ahead in time by this lag.  **However significant departures between the two series can happen if new cases show very different demographics** (i.e., the dramatic decline in the median age of new Covid cases which seems to be confirmed by changes in hospitalization-ED patterns shown above) **than prior cases.**
+The chart below plots 7-day mean cases plotted ahead in time by this lag.  **However significant departures between the two series can happen if new cases show very different demographics** (i.e., the dramatic decline in the median age of new Covid cases which seems to be confirmed by changes in hospitalization-ED patterns shown above) **than prior cases.**
 
 ```{r fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
 
 lagz
 ```
 
+## FL Covid Deaths As A Percentage Of All FL Deaths In 2020
+
+CDC data on FL lags the FL DOH data (which is where the CDC gets their data), but the weekly percentage of All FL Deaths due to Covid should be accurate unless Covid deaths are reported with a greater/lesser lag than other deaths.  The last weekly CDC value indicates **Covid deaths now comprise `r percent(lastCDCpct,digits=1)` of all FL deaths, down from a maximum weekly value of `r percent(max(cdcDat$pctCov,na.rm=T),digits=1)`**.
+
+```{r}
+suppressWarnings(ny3)
+```
+
+## FL Deaths From All Causes vs. Prior Years
+
+The chart below compares 2020 to prior years. Deaths for prior years have been adjusted upwards to account for population growth. Through week `r lastWkNum`, total deaths were `r comma(round(excessDeaths,0))` above the mean of the 4 prior years.
+
+```{r fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
+
+allDthPlot
+```
+
+## Google Mobility Data FL compared to NY and TX
+
+Tracking deviation from "normal" baseline activity within recreation, workplace, and residential (staying near home).
+
+```{r, warning=FALSE}
+g1
+g2
+g3
+```
 
 ## March - May All Deaths vs. Covid Deaths
 
