@@ -43,6 +43,7 @@ library(jsonlite)
 library(xlsx)
 library(gsheet)
 library(tidyverse)
+library(summarytools)
 
 
 # Google mobility data
@@ -306,19 +307,22 @@ urlfile = paste0(
 )
 JHcounty <- data.table(read_csv(url(urlfile)))
 
+# CDC model forecasts for FL
+url2<-"https://www.cdc.gov/coronavirus/2019-ncov/covid-data/files/2020-06-22-model-data.csv"
+ cdcForecast<-data.table(read_csv(url(url2)))
+ cdcForecast<-cdcForecast[location_name=="Florida" & target_week_end_date==max(target_week_end_date),]
+ cdcForecast<-cdcForecast[order(point),]
+ cdcForc<-cdcForecast[,c(1,2,4,6:8)]
+ # write.csv(cdcForc,file="CDCforecast.csv")
+
 # REad in FL DOH data
-# cdcForecast<-data.table(read_csv("C:\\Users/whelanh/Downloads/2020-06-22-model-data.csv"))
-# cdcForecast<-cdcForecast[location_name=="Florida" & target_week_end_date==max(target_week_end_date),]
-# cdcForecast<-cdcForecast[order(point),]
-# cdcForc<-cdcForecast[,c(1,2,4,6:8)]
-# write.csv(cdcForc,file="CDCforecast.csv")
-
-
 url2 = "https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
 flDat<- data.table(read_csv(url(url2), skip = 0))
 flDat[, eDat := as.Date(EventDate)]
 flDat[, cDat := as.Date(Case1)]
 flDat[, chtDat := as.Date(ChartDate)]
+
+
 
 # Section for when DOH site not working and get from https://covid19-usflibrary.hub.arcgis.com/search?owner=USFDHHC.GIS
 # url2<-"C:\\Users/whelanh/Downloads/Florida_COVID19_06242020_Case_Line_Data.csv"
@@ -983,6 +987,18 @@ lines(u1t$x,predict(modN),col='blue')
 
 ```
 
+## Model forecasts for FL Covid Deaths
+
+The [CDC](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/forecasting-us.html#state-forecasts) periodically summarizes approximately 20 model forecasts for FL Covid deaths. These forecasts are higher than the Gompertz/Network "forecasts" above. It may be that the Gompertz/Network equations are better viewed as "after the fact" mathematical descriptors than forecasts.
+
+```{r warning=F,echo=FALSE}
+kable(cdcForc,table.attr = "style='width:75%;'")
+```
+
+```{r warning=F,echo=FALSE, results='asis'}
+print(dfSummary(cdcForc[,3:6], plain.ascii = FALSE, style = "grid",graph.magnif = 0.75, missing.col=F,valid.col = FALSE),method = 'render')
+```
+
 ## Florida Covid Testing Volume
 
 ```{r warning=F}
@@ -994,9 +1010,9 @@ test3
 Values for the latest month are effected by increases in testing volume which can increase the number of cases (the denominator), and by lags (as much as 21 days) between case identification and death (which can suppress the numerator).
 
 ```{r}
-kable(ttt2[1:(nrow(ttt2)-1),],caption="CFR By Month Number")
+kable(ttt2[1:(nrow(ttt2)-1),],caption="CFR By Month Number",table.attr = "style='width:75%;'")
 
-kable(tttc,caption = "Total Deaths and Cases By Month (based on Event Date)")
+kable(tttc,caption = "Total Deaths and Cases By Month (based on Event Date)",table.attr = "style='width:50%;'")
 ```
 
 
