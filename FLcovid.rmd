@@ -39,11 +39,56 @@ library(Hmisc)
 library(smoother)
 library(HDInterval)
 library(ggExtra)
-library(jsonlite)
 library(xlsx)
 library(gsheet)
 library(tidyverse)
 library(summarytools)
+
+# FL cause of death data
+# http://www.flhealthcharts.com/FLQUERY/Death/DeathCount.aspx
+
+
+
+# CDC underlying cause of death data
+
+url2 <- "https://data.cdc.gov/resource/muzy-jte6.csv"
+causeDeath <- data.table(read.csv(url(url2)))
+causeDeath<-causeDeath[jurisdiction_of_occurrence=="Florida",]
+causeMaxWeek<-causeDeath[mmwryear==2020,max(mmwrweek)]
+causeDeath[is.na(causeDeath)] <- 0
+
+cause<-data.frame(t(causeDeath[mmwrweek<=causeMaxWeek, lapply(.SD, sum), by = mmwryear, .SDcols=5:19]))
+cause$chg<-cause$X2-cause$X1
+cause$chgPct=cause$X2/cause$X1-1
+cause<-cause[2:nrow(cause),]
+colnames(cause)<-c("2019 partial","2020 partial","Difference","Pct Change")
+
+# cdc place of death data
+
+url2<-"https://data.cdc.gov/resource/uggs-hy5q.csv"
+placeDeath<-data.table(read.csv(url(url2)))
+placeDeath<-placeDeath[state=="United States" | state=="Florida",]
+placeDeath[is.na(placeDeath)] <- 0
+placeDeath[,pctCovid:=covid19_deaths/sum(covid19_deaths),by=state]
+placeDeath[,pctPIcovid:=pneumonia_influenza_or_covid19/sum(pneumonia_influenza_or_covid19),by=state]
+
+placeCht1<-ggplot(placeDeath, aes(x=place_of_death, y=pctCovid, fill=state)) +
+    geom_bar(stat='identity', position='dodge') +
+   theme(axis.text.x = element_text(angle = 50, vjust = 1, hjust=1)) +
+     scale_y_continuous(labels=scales::percent) +
+  labs(y="% of Covid Deaths",
+       x="Place of Death",
+       title="Florida: Place of Death For Covid Deaths",
+       subtitle = "https://data.cdc.gov/NCHS/Provisional-COVID-19-Death-Counts-by-Place-of-Deat/uggs-hy5q")
+
+placeCht2<-ggplot(placeDeath, aes(x=place_of_death, y=pctPIcovid, fill=state)) +
+    geom_bar(stat='identity', position='dodge') +
+   theme(axis.text.x = element_text(angle = 50, vjust = 1, hjust=1)) +
+     scale_y_continuous(labels=scales::percent) +
+  labs(y="% of P, I & Covid Deaths",
+       x="Place of Death",
+       title="Florida: Place of Death For Pneumonia, Influenza or Covid",
+       subtitle = "https://data.cdc.gov/NCHS/Provisional-COVID-19-Death-Counts-by-Place-of-Deat/uggs-hy5q")
 
 
 # Google mobility data
@@ -97,7 +142,7 @@ g3<-ggplot(stGoog, aes(x=date, y=residential_percent_change_from_baseline, group
 
 # The population of Florida in 2019 was 21,477,737, a 1.1% increase from 2018. The population of Florida in 2018 was 21,244,317, a 1.34% increase from # 2017. The population of Florida in 2017 was 20,963,613, a 1.7% increase from 2016. The population of Florida in 2016 was 20,613,477, a 2% increase # from 2015.
 multply<-c(1.011*1.0134*1.017*1.02,1.011*1.0134*1.017,1.011*1.0134,1.011,1)
-fluDat<-data.table(read.csv("C://Users/whelanh/Downloads/State_Florida_2015-20_Data.csv"))
+fluDat<-data.table(read.csv("C://Users/whelanh/Dropbox/covid/State_Florida_2015-20_Data.csv"))
 fluDat[,totDeath:=as.numeric(gsub(",","",TOTAL.DEATHS))]
 fluDat[SEASON=="2015-16",adjDeath:=multply[1]*totDeath]
 fluDat[SEASON=="2016-17",adjDeath:=multply[2]*totDeath]
@@ -107,7 +152,7 @@ fluDat[SEASON=="2019-20",adjDeath:=totDeath]
 fluDat[,season:=paste0(substr(SEASON,1,2),substr(SEASON,6,7))]
 
 # need to change this manually to 2 on Friday, back to 3 when week advances 1
-lastWkNum<-week(Sys.Date())-2
+lastWkNum<-week(Sys.Date())-3
 
 deets<-fluDat[WEEK<lastWkNum,.(sum(totDeath),sum(adjDeath)),by=SEASON]
 
@@ -185,7 +230,7 @@ nytf <- nyt[state == "Florida", ]
 fl2018dBym <-
   data.table(
     read.xlsx(
-      "c://Users/whelanh/Downloads/FL2018byMonth.xlsx",
+      "C://Users/whelanh/Dropbox/covid/FL2018byMonth.xlsx",
       sheetName = "Sheet1",
       startRow = 3,
       header = F
@@ -194,7 +239,7 @@ fl2018dBym <-
 fl2019dBym <-
   data.table(
     read.xlsx(
-      "c://Users/whelanh/Downloads/FL2019byMonth.xlsx",
+      "C://Users/whelanh/Dropbox/covid/FL2019byMonth.xlsx",
       sheetName = "Sheet1",
       startRow = 3,
       header = F
@@ -203,7 +248,7 @@ fl2019dBym <-
 fl2020dBym <-
   data.table(
     read.xlsx(
-      "c://Users/whelanh/Downloads/FL2020byMonth.xlsx",
+      "C://Users/whelanh/Dropbox/covid/FL2020byMonth.xlsx",
       sheetName = "Sheet1",
       startRow = 3,
       header = F
@@ -221,19 +266,22 @@ f2019 <- tTable(fl2019dBym)
 f2020 <- tTable(fl2020dBym)
 f2018 <- tTable(fl2018dBym)
 
+# Include another month
+MonToInclude <- 6   #### CHANGE HERE EVERY MONTH
+
 # Adust deaths for population growth to compare to 2020
 grAdjBase <- (f2018 * 1.012 ^ 2 + f2019 * 1.012) / 2
 delt2020 <- f2020 - grAdjBase
-marMaysum <- data.frame(colSums(delt2020[3:5, ]))
+marMaysum <- data.frame(colSums(delt2020[3:MonToInclude, ]))
 marMaysum$county <- tolower(rownames(marMaysum))
 
-grAdjBaseSum<-data.frame(colSums(grAdjBase[3:5, ]))
+grAdjBaseSum<-data.frame(colSums(grAdjBase[3:MonToInclude, ]))
 grAdjBaseSum$county<-tolower(rownames(grAdjBaseSum))
 
-f2020BaseSum<-data.frame(colSums(f2020[3:5, ]))
+f2020BaseSum<-data.frame(colSums(f2020[3:MonToInclude, ]))
 f2020BaseSum$county<-tolower(rownames(f2020BaseSum))
 
-nytMay <- data.frame(nytf[date == "2020-05-31", ])
+nytMay <- data.frame(nytf[date == "2020-06-30", ])  #### CHANGE HERE EVERY MONTH
 nytMay$county <- tolower(nytMay$county)
 
 compTab<-merge(grAdjBaseSum,f2020BaseSum,by="county")
@@ -253,7 +301,7 @@ ansTab <- rbind(c("TOTAL", colSums(ansTab[2:6])),ansTab)
 fl2019dByAge <-
   data.table(
     read.xlsx(
-      "c://Users/whelanh/Downloads/FL2019byAge.xlsx",
+      "C://Users/whelanh/Dropbox/covid/FL2019byAge.xlsx",
       sheetName = "Sheet1",
       startRow = 3,
       header = F
@@ -265,7 +313,7 @@ colnames(fl2019dByAge)<-c("Region","Total","0-<1","1-4","5-9","10-14","15-19","2
 fl2020dByAge <-
   data.table(
     read.xlsx(
-      "c://Users/whelanh/Downloads/FL2020byAge.xlsx",
+      "C://Users/whelanh/Dropbox/covid/FL2020byAge.xlsx",
       sheetName = "Sheet1",
       startRow = 3,
       header = F
@@ -308,7 +356,7 @@ urlfile = paste0(
 JHcounty <- data.table(read_csv(url(urlfile)))
 
 # CDC model forecasts for FL
-url2<-"https://www.cdc.gov/coronavirus/2019-ncov/covid-data/files/2020-06-22-model-data.csv"
+url2<-"https://www.cdc.gov/coronavirus/2019-ncov/covid-data/files/2020-06-29-model-data.csv"
  cdcForecast<-data.table(read_csv(url(url2)))
  cdcForecast<-cdcForecast[location_name=="Florida" & target_week_end_date==max(target_week_end_date),]
  cdcForecast<-cdcForecast[order(point),]
@@ -322,6 +370,37 @@ flDat[, eDat := as.Date(EventDate)]
 flDat[, cDat := as.Date(Case1)]
 flDat[, chtDat := as.Date(ChartDate)]
 
+flDat[Hospitalized=="YES",hosp:=1]
+flDat[is.na(hosp),hosp:=0]
+flDat[Hospitalized=="YES" & EDvisit=="YES",hospED:=1]
+flDat[is.na(hospED),hospED:=0]
+flDat[EDvisit=="YES",edvisitor:=1]
+flDat[is.na(edvisitor),edvisitor:=0]
+flDat[EDvisit=="YES" & Hospitalized != "YES",edNoHosp:=1]
+flDat[is.na(edNoHosp),edNoHosp:=0]
+
+hospShare<-flDat[,.(sum(hosp),sum(hospED),sum(edvisitor),sum(edNoHosp)),by=eDat]
+hospShare[,pctED:=V2/V1]
+hospShare[,EDpctNotHosp:=V4/V3]
+hospShare<-hospShare[eDat>"2020-03-15",]
+
+edHospShare<- ggplot(hospShare) + 
+  geom_line(aes(x = eDat, y = pctED, color="steelblue")) + 
+   scale_y_continuous(labels=scales::percent, limits=c(0,1)) +
+  theme(legend.position = "none") +
+    labs(y = "% Hospitalizations Also Coded For ED Visit",
+                 x = "Event Date",
+                 colour = "Florida",
+                 title = "Florida: % of Hospitalizations Also Coded EDvisit = 'YES'") 
+
+edHospShare2<- ggplot(hospShare) + 
+  geom_line(aes(x = eDat, y = EDpctNotHosp, color="steelblue")) + 
+   scale_y_continuous(labels=scales::percent, limits=c(0,1)) +
+  theme(legend.position = "none") +
+    labs(y = "% EDvist='YES' But Hospitalization != 'YES'",
+                 x = "Event Date",
+                 colour = "Florida",
+                 title = "Florida: % of All ED visits NOT Coded Hospitalization = 'YES'")  
 
 
 # Section for when DOH site not working and get from https://covid19-usflibrary.hub.arcgis.com/search?owner=USFDHHC.GIS
@@ -350,6 +429,8 @@ flDat[Age>=85, ageCat:="85 or more"]
 flDat[Hospitalized=="YES",hosCat:="Hospitalized"]
 flDat[Hospitalized!="YES" & EDvisit=="YES",hosCat:="ED Only"]
 flDat[is.na(hosCat),hosCat:="Other"]
+flDat[Hospitalized=="YES",hospice:=1]
+flDat[is.na(hospice),hospice:=0]
 
 cDeathbyAge<-flDat[Died=="Yes",.N, by=Age_group]
 cDeathbyAge[,pctTot:=N/sum(N)]
@@ -362,7 +443,9 @@ allCcomb[Age=="5-9",Age:="05-9"]
 allCcht<-ggplot(allCcomb, aes(fill=year, y=pctTot, x=Age)) + 
     geom_bar(position="dodge", stat="identity")
 
-allCcomb[Age=="0-<1" | Age=="01-4"| Age=="05-9" | Age=="10-14" | Age=="15-19" | Age=="20-24",Age_group:="15-24 years"]
+allCcomb[Age=="0-<1" | Age=="01-4" ,Age_group:="0-4 years"]
+allCcomb[Age=="05-9" | Age=="10-14",Age_group:="5-14 years"]
+allCcomb[Age=="15-19" | Age=="20-24",Age_group:="15-24 years"]
 allCcomb[Age=="25-34",Age_group:="25-34 years"]
 allCcomb[Age=="35-44",Age_group:="35-44 years"]
 allCcomb[Age=="45-54",Age_group:="45-54 years"]
@@ -375,6 +458,7 @@ newTab<-allCcomb[,sum(pctTot),by=c("year","Age_group")]
 cDeathbyAge[,year:="CovidDeaths2020"]
 colnames(newTab)<-c("year","Age_group","pctTot")
 newTab2<-rbind(newTab,cDeathbyAge[,c("year","Age_group","pctTot")])
+newTab2[Age_group=="5-14 years",Age_group:="05-14 years"]
 
 allCcht2<-ggplot(newTab2, aes(fill=year, y=pctTot, x=Age_group)) + 
     geom_bar(position="dodge", stat="identity") +
@@ -385,6 +469,8 @@ allCcht2<-ggplot(newTab2, aes(fill=year, y=pctTot, x=Age_group)) +
   title = "FL Distribution of All Deaths and Covid Deaths",
   subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data"
 )
+
+
 
 # re-look at lags
   
@@ -476,11 +562,13 @@ colnames(ansMM2)<-c("lag","V1","lag2","V1rel")
 
   lagz <- ggplot(Samp2, aes(x = cDat))
  # lagz <- lagz + geom_line(aes(x=cDat+bestLag, y= d7Case, colour = paste("7-Day Avg Daily Cases Fwd ",bestLag)))
- lagz <- lagz + geom_line(aes(x=cDat+bestLagNew, y= d7CaseRel, colour = paste("7-Day Avg Cases Older Than",ageCutoff," Fwd ",bestLagNew)))
+ lagz <- lagz + geom_line(aes(x=cDat+bestLagNew, y= d7CaseRel, colour = paste("7-Day Avg Cases Older Than",ageCutoff," Fwd ",bestLagNew,"(left)")))
  #  lagz <- lagz + geom_line(aes(x=cDat, y= (d7Case), colour = paste("7-Day Avg Daily All Cases"))) 
  # lagz <- lagz + geom_line(aes(x=cDat, y= (d7CaseRel), colour = paste("7-Day Avg Cases Age Older Than ",ageCutoff))) 
 #   # adding the relative humidity data, transformed to match roughly the range of the temperature
-  lagz <- lagz + geom_line(aes(x=cDat, y = d7Death*20, colour = "7 Day Avg. Daily Deaths"))
+  lagz <- lagz + geom_line(aes(x=cDat, y = d7Death*20, colour = "7 Day Avg. Daily Deaths (right)"))
+  # lagz<- lagz + geom_vline(xintercept = as.Date("2020-06-01"), linetype="dashed", 
+                # color = "black", size=1.1)
 # 
 #   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
 #   # and, very important, reverting the above transformation
@@ -499,10 +587,24 @@ colnames(ansMM2)<-c("lag","V1","lag2","V1rel")
   flDat[,mn:=month(eDat)]
   # flDat[,cs:=1]
   flDat[Age_group=="5-14 years",Age_group:="05-14 years"]
+  
+  #CFR
   ttt1<-flDat[,sum(death)/.N,by=c("mn","Age_group")]
   
   ttt1[,V1:=percent(V1,digits = 1)]
   ttt2<-spread(ttt1,mn,V1)
+  
+  # hospitalization rate
+  ttt3<-flDat[,sum(hospice)/.N,by=c("mn","Age_group")]
+  ttt3[,V1:=percent(V1,digits = 1)]
+  ttt3<-spread(ttt3,mn,V1)
+  
+  # hosp death rate
+  ttt4<-flDat[,sum(death)/sum(hospice),by=c("mn","Age_group")]
+  ttt4[,V1:=percent(V1,digits = 1)]
+  ttt4<-spread(ttt4,mn,V1)
+  
+  
   
   # tttlag1<-flDat[,sum(lag(cs,14),na.rm = T),by=c("eDat","Age_group")]
   # tttlag2<-flDat[,sum(death),by=c("eDat","Age_group")]
@@ -545,6 +647,39 @@ colnames(ansMM2)<-c("lag","V1","lag2","V1rel")
  #  
  # plot(stLevel$Date,stLevel$deathIncrease)
  
+# section lookin at linear decline in cum death growth rate.
+test<-flDat[,sum(death),by=eDat]
+test[,deltaDeath:=V1/lag(V1,1)]
+test[,cumDeath:=cumsum(V1)]
+test[,deltaCumDeath:=cumDeath/lag(cumDeath,1)]
+test[,sevDcum:=rollmean(cumDeath,7,align = "right",na.pad = T)]
+test[,delt7DayCum:=sevDcum/lag(sevDcum,1)]
+test[,lglgD7:=log(log(delt7DayCum))]
+
+subtest<-test[eDat>"2020-03-15" & eDat < Sys.Date()-7,]
+lglgMod<-lm(data=subtest,lglgD7 ~ eDat)
+
+test[,pred:=predict(lglgMod,newdata = test)]
+test[,predDelt:=exp(exp(pred))]
+test[,fit7dayCum:=predDelt*lag(sevDcum,1)]
+
+linearDF<-data.frame(seq(Sys.Date()-4,Sys.Date()+120,by=1))
+colnames(linearDF)<-c("eDat")
+linearDF$pred<-predict(lglgMod,newdata = linearDF)
+linearDF$delt<-exp(exp(linearDF$pred))
+linearDF$fwd7cumDeath<-test[eDat==Sys.Date()-4,sevDcum]*cumprod(linearDF$delt)
+additionalDeaths<-max(linearDF$fwd7cumDeath)-max(test$sevDcum,na.rm = T)
+
+mlevitt<- ggplot(test[eDat>"2020-03-15"]) + 
+  geom_point(aes(x = eDat, y = lglgD7, color="log(log(d(7-Day Avg. Cum. Death/dt)))")) + 
+  geom_line(aes(x = eDat, y = pred, color="Predicted")) + 
+ scale_colour_manual(values = c("steelblue", "darkred")) +
+    labs(y = "log(log(7-Day Avg. Cum Death/dt)))",
+                 x = "Event Date",
+                 colour = "Florida",
+                 title = "Florida: Plot of log(log(growth rate of cumulative Covid deaths))") +
+   theme(legend.position = c(as.numeric(test[eDat=="2020-04-01",eDat]), -6))
+
 
   
 
@@ -608,7 +743,7 @@ ddcht<- ggplot(dd, aes(x = eDat, y = N))+
 )
 
 ddcht2 <- ggplot(dd,aes(x=eDat,y=Roll7pctGE65)) + geom_line() +
-   scale_y_continuous(labels=scales::percent) +
+   scale_y_continuous(labels=scales::percent, limits = c(0,1)) +
   labs(  y = "7 Day Mean % All Deaths",
   x = "Event Date",
   title = "% of Covid Deaths From Those Aged 65 and Older",
@@ -639,7 +774,7 @@ ddd2[,Roll7pctHospitalized:=rollmean(pctHospitalized,7,align = "right",na.pad = 
 ddd<-merge(ddd,ddd2,by="eDat")
 
 dddcht2 <- ggplot(ddd,aes(x=eDat,y=Roll7pctHospitalized)) + geom_line() +
-   scale_y_continuous(labels=scales::percent) +
+   scale_y_continuous(labels=scales::percent, limits = c(0,1)) +
   labs(  y = "7 Day Mean % All Deaths",
   x = "Event Date",
   title = "% of Covid Deaths That Were Hospitalized",
@@ -672,32 +807,36 @@ yest2 <- flDat[eDat == max(eDat), ]
 
 mage <- flDat[, .(.N, median(Age, na.rm = T)), by = eDat]
 mage[order(eDat), ]
+hage<-flDat[Hospitalized=="YES",median(Age,na.rm = T),by=eDat]
+mage<-merge(mage,hage,by="eDat")
 
 mage <- mage[eDat > "2020-02-29", ]
+
 
 
 mz <- ggplot(mage, aes(x = eDat))
 mz <-
   mz + geom_line(aes(x = eDat, y = V2 , colour = "Median Age Covid Cases (left axis)"))
+mz<- mz + geom_line(aes(x = eDat, y = V1 , colour = "Median Age Covid Hospitalizations (left axis)"))
 
 #   # adding the relative humidity data, transformed to match roughly the range of the temperature
 mz <-
-  mz + geom_line(aes(x = eDat, y = N / 60, colour = "Daily Cases (right axis)")) +
+  mz + geom_line(aes(x = eDat, y = N /180, colour = "Daily Cases (right axis)")) +
   theme_bw()
 #   # now adding the secondary axis, following the example in the help file ?scale_y_continuous
 #   # and, very important, reverting the above transformation
 mz <-
-  mz + scale_y_continuous(sec.axis = sec_axis( ~ . * 60, name = "Daily Cases"))
+  mz + scale_y_continuous(sec.axis = sec_axis( ~ . * 180, name = "Daily Cases"))
 #
 #   # modifying colours and theme options
-mz <- mz + scale_colour_manual(values = c("blue", "red"))
+mz <- mz + scale_colour_manual(values = c("blue", "red","black"))
 mz <- mz + labs(
   y = "Age",
   x = "Event Date",
   colour = "Florida",
-  subtitle = "Data: https://opendata.arcgis.com/datasets/37abda537d17458bae6677b8ab75fcb9_0.csv"
+  subtitle = "Data: https://open-fdoh.hub.arcgis.com/datasets/florida-covid19-case-line-data/data"
 )
-mz <- mz + theme(legend.position = c(0.3, 0.5))
+mz <- mz + theme(legend.position = c(0.35, 0.4))
 
 cage <- flDat[, .(.N, sum(Age > 64, na.rm = T)), by = eDat]
 cage[, pctGE65 := V2 / N]
@@ -796,13 +935,13 @@ gomEq2 <- function(a,b,c) {
 }
 
 # Use case date because it deaths probably occurred after Event Date (first contact)
-gomDat<-flDat[Died=="Yes",.N,by=cDat]
-gomDat<-gomDat[order(cDat),]
+gomDat<-flDat[Died=="Yes",.N,by=eDat]
+gomDat<-gomDat[order(eDat),]
 gomDat[,cumDeath:=cumsum(N)]
 
-fstDate<-gomDat[cumDeath>9,min(cDat)]
+fstDate<-gomDat[cumDeath>9,min(eDat)]
 
-u1t <- gomDat[cDat >= fstDate, ]
+u1t <- gomDat[eDat >= fstDate, ]
 data1 <- data.frame(seq(1:nrow(u1t)),u1t$cumDeath)
 colnames(data1) <- c("d", "cd")
 
@@ -824,19 +963,13 @@ Gompfit <- function(d1,u1) {
   u1t[,x:=1:nrow(u1t)]
   colnames(u1t)<-c("cDat","deathIncrease","cumDeath","x")
 
-  modN <- nlsLM(
-    deathIncrease ~ (K∗(x) ^ q)∗exp(−(x) / z),
-    data = u1t,
-    start = list(K = 200,
-                 q = 0.9,
-                 z = 8)
-  )
+  modN <- nlsLM(deathIncrease ~ (K∗(x) ^ q)∗exp(−(x) / z),data = u1t, start = list(K = 200,q = 0.9, z = 8))
   
   netTotal<-sum(predict(modN,newdata=data.frame(x=seq(1,300))))
   
   library(easynls)
   #fit data to the Gompertz model form 1
-  mod10<-nlsfit(data1, model=10, start = c(a=3400,b=8,c=.1))
+  mod10<-nlsfit(data1, model=10, start = c(a=3400,b=11,c=.1))
   mod10
 
 
@@ -852,12 +985,101 @@ Gompfit <- function(d1,u1) {
   # data1 <- data.frame(seq(1:nrow(u1t)), u1t$cumDeath)
   # colnames(data1) <- c("d", "cd")
   # 
-  # obCT<-Gompfit(data1,u1t)  
+  # obCT<-Gompfit(data1,u1t)
 
   #fit network graph to FL daily death datatail
 
+# Adding a SIR model   
+  # From https://rpubs.com/choisy/sir and https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4552173/
+
+library(deSolve) # using the "ode" function
+  
+covidSIR<-flDat[Died=="Yes",.N,by=eDat]
+covidSIR<-covidSIR[order(eDat)]
+covCum<-data.frame(cbind(seq(1:nrow(covidSIR)),cumsum(covidSIR$N)))
+colnames(covCum)<-c("days","cumDeath")  
+  
+  
+sir_1 <- function(beta, gamma, f, S0, I0, D0, R0, times) {
+  require(deSolve) # for the "ode" function
+  
+  # the differential equations:
+  sir_equations <- function(time, variables, parameters) {
+    with(as.list(c(variables, parameters)), {
+      dS <- -beta * I * S
+      dI <-  beta * I * S - gamma * I
+      dD <-  gamma * f * I
+      dR <-  (1 - f) * gamma * I
+      return(list(c(dS, dI, dD, dR)))
+    })
+  }
+  
+  # the parameters values:
+  parameters_values <- c(beta  = beta, gamma = gamma, f=f)
+  
+  # the initial values of variables:
+  initial_values <- c(S = S0, I = I0, D=D0, R = R0)
+  
+  # solving
+  out <- ode(initial_values, times, sir_equations, parameters_values)
+  
+  # returning the output:
+  as.data.frame(out)
+}
 
 
+startRow <- 40
+popSize <- 4e6
+
+ss <- function(beta, gamma, f, data = covCum[startRow:nrow(covCum),], N = popSize) {
+  I0 <- data$cumDeath[1]/0.0026
+  D0<- data$cumDeath[1]
+  times <- data$days
+  predictions <- sir_1(beta = beta, gamma = gamma, f = f,  # parameters
+                       S0 = N - I0 - D0, I0 = I0, D0 = D0, R0 = 0, # variables' intial values
+                       times = times)                # time points
+  sum((predictions$D[-1] - data$cumDeath[-1])^2)
+}
+
+# xx<-sir_1(0.0025,.1,0.0026,popSize,1,0,0,time_values)
+ss2 <- function(x) {
+  ss(beta = x[1], gamma = x[2], f = x[3])
+}
+
+
+  # beta_val <- seq(from = 0.000026, to = 0.00000026, le = 100)
+  # ss_val <- sapply(beta_val, ss, beta = 1.08, gamma = 0.5)
+
+starting_param_val <- c(.0000003,0.5,.00005)
+ss_optim <- optim(starting_param_val, ss2)
+
+
+for (i in 1:10) {
+starting_param_val <- c(ss_optim$par[1],ss_optim$par[2],ss_optim$par[3])
+ss_optim <- optim(starting_param_val, ss2)
+}
+
+InitInf<-covCum[startRow,]$cumDeath/0.0026
+do<-covCum[startRow,]$cumDeath
+
+xx<-sir_1(ss_optim$par[1],ss_optim$par[2],ss_optim$par[3],
+          popSize-InitInf - do,
+          InitInf,
+          do,
+          0,
+          covCum[startRow:nrow(covCum),]$days)
+
+plot(xx$time,xx$D)
+lines(covCum[startRow:nrow(covCum),]$days,covCum[startRow:nrow(covCum),]$cumDeath,col='red')
+
+xxP<-sir_1(ss_optim$par[1],ss_optim$par[2],ss_optim$par[3],
+          popSize-InitInf - do,
+          InitInf,
+          do,
+          0,
+          seq(startRow,300,1))
+
+SIRdeaths<-max(xxP$D)
 
 #-------------------------------------------------------------------------------------------------
 
@@ -898,6 +1120,14 @@ xxcht
 xxxcht
 ```
 
+## Hospitalization and ED visit Trends
+
+The two charts below show (1) that almost all Covid cases that are hospitalized also were identified as having visited the ED, and (2) the share of ED Covid visits that were NOT identified as having been hospitalized has been increasing.
+
+```{r, warning=F}
+edHospShare
+edHospShare2
+```
 
 ## Age Demographics Of FL Covid Deaths
 
@@ -923,6 +1153,14 @@ As of `r max(ltcDat2$date)`, **the cumulative total of long term care Covid deat
 
 ```{r echo=FALSE,fig.width=10, fig.height=8, fig.fullwidth=TRUE,warning=FALSE}
 suppressWarnings(ltc)
+```
+
+## Covid: Place Of Death vs. US averages
+
+```{r, figures-side, fig.show="hold", out.width="90%"}
+par(mar = c(4, 4, .1, .1))
+placeCht1
+placeCht2
 ```
 
 ## Covid Death and Cases Percentages By Gender
@@ -967,7 +1205,7 @@ I am not aware of good FL data that separately dates infection versus death.  FL
 The Gompertz equation projects total deaths of **`r comma(gdeath,digits=0)`**.  The Network Graph equation projects total deaths of **`r comma(ndeath,digits=0)`** deaths.  These both compare to currently reported total deaths of **`r comma(currdeath,digits=0)`**. This would imply that FL has already experienced approximately `r percent(currdeath/ndeath,digits = 0)` of total projected deaths. The chart below summarizes the Gompertz equation fit to FL's cumulative Covid death curve:
 
 ```{r}
-nlsplot(data1,model = 10,start = c(a = 3400, b = 8, c = .1),xlab = "Days since Cum Deaths>=10, Gompertz Eq. ",ylab = "FL Cum Covid Deaths",position = 1)
+nlsplot(data1,model = 10,start = c(a = 3400, b = 11, c = .1),xlab = "Days since Cum Deaths>=10, Gompertz Eq. ",ylab = "FL Cum Covid Deaths",position = 1)
 u1tRows<-nrow(u1t)
 
 gomEq <- function(t) {
@@ -987,6 +1225,15 @@ lines(u1t$x,predict(modN),col='blue')
 
 ```
 
+
+## Simple Extrapolation of Declining Growth Rate of Cumulative Covid Deaths
+
+Michael Levitt (@MLevitt_NP2013) is the first one to observe that the growth rate of Covid cumulative deaths declines linearly in nearly every region infected with Covid. That has been the case for Florida as shown below.  The chart also makes clear that deaths will be added to the last 4 days as future records are processed by the Florida DOH as those dates fall significantly below the linear relationship. If the relationship continues to be stable, extrapolating the red line indicates there will be approsimately `r comma(additionalDeaths,digits=0)` additional Covid deaths.
+
+```{r warning=F}
+mlevitt
+```
+
 ## Model forecasts for FL Covid Deaths
 
 The [CDC](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/forecasting-us.html#state-forecasts) periodically summarizes approximately 20 model forecasts for FL Covid deaths. These forecasts are higher than the Gompertz/Network "forecasts" above. It may be that the Gompertz/Network equations are better viewed as "after the fact" mathematical descriptors than forecasts.
@@ -996,7 +1243,18 @@ kable(cdcForc,table.attr = "style='width:75%;'")
 ```
 
 ```{r warning=F,echo=FALSE, results='asis'}
-print(dfSummary(cdcForc[,3:6], plain.ascii = FALSE, style = "grid",graph.magnif = 0.75, missing.col=F,valid.col = FALSE),method = 'render')
+# print(dfSummary(cdcForc[,3:6], plain.ascii = FALSE, style = "grid",graph.magnif = 0.75, missing.col=F,valid.col = FALSE),method = 'render')
+```
+
+## Fitting A SIR Model To FL Covid Deaths
+
+A standard model used in epidimeology is the SIR model. More about the form of SIR model I use can be found at this [link](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4552173/). The only difference between the formulas I use and those described at the link is I do not include a re-infection term. I derived the SIR parameters using deaths (not cases). Working with these models it seems to me they have a weakness fitting both the early part and the latter part of the Covid cumulative death curve. The chart below shows the SIR forecasted daily death line versus FL DOH reported daily deaths. The SIR forecast for ultimate total FL deaths is `r comma(SIRdeaths,digits=0)`.  This is in-line with the other models listed above.  
+
+```{r warning=F}
+plot(covCum$cumDeath[40:nrow(covCum)]-lag(covCum$cumDeath[40:nrow(covCum)],1),ylab = "Daily Covid Deaths",
+     xlab = "Days Since The 40th Day Of Deaths",main = "FL Daily Deaths vs. SIR fit (red line)")
+lines(xxP$D-lag(xxP$D,1),col='red')
+
 ```
 
 ## Florida Covid Testing Volume
@@ -1005,12 +1263,14 @@ print(dfSummary(cdcForc[,3:6], plain.ascii = FALSE, style = "grid",graph.magnif 
 test3
 ```
 
-## Florida Case Fatality Ratio By Month
+## Florida Hospitalization/Case Ratio, Case Fatality Ratio and Death/Hospitalization By Month
 
 Values for the latest month are effected by increases in testing volume which can increase the number of cases (the denominator), and by lags (as much as 21 days) between case identification and death (which can suppress the numerator).
 
 ```{r}
-kable(ttt2[1:(nrow(ttt2)-1),],caption="CFR By Month Number",table.attr = "style='width:75%;'")
+kable(ttt3[1:(nrow(ttt3)-1),c(1,3:7)],caption="Hospitalization/Case Ratio By Month Number",table.attr = "style='width:75%;'")
+kable(ttt2[1:(nrow(ttt2)-1),c(1,3:7)],caption="CFR By Month Number",table.attr = "style='width:75%;'")
+kable(ttt4[1:(nrow(ttt4)-1),c(1,3:7)],caption="Covid Death/Hospitalization Ratio By Month Number",table.attr = "style='width:75%;'")
 
 kable(tttc,caption = "Total Deaths and Cases By Month (based on Event Date)",table.attr = "style='width:50%;'")
 ```
@@ -1020,7 +1280,7 @@ kable(tttc,caption = "Total Deaths and Cases By Month (based on Event Date)",tab
 
 Using the FL DOH caseline data, I look at the autocorrelation between 7-day mean daily cases and 7-day mean daily deaths. For this exercise I use **Case Date** because I am trying to answer the question: how does the most recent report on cases line up with future increases in reported deaths? I am not concerned with Event Date when these actually may have occurred in the past. Seven day smoothing is used to eliminate the strong day of the week effect because of subdued reporting on weekends.
 
-The most powerful lag is `r bestLag` days between **all** reported cases and subsequent deaths. **However not all cases are likely to produce deaths.**  **Cases aged over `r ageCutoff` generate 90% of all FL Covid deaths** (this number has been stable pre and post May 20). When we examine the best lag for these relevant cases, the best lag is `r bestLagNew` days.  Thus there is very little evidence that these relevant case numbers "lead" deaths. 
+The most powerful lag is `r bestLag` days between **all** reported cases and subsequent deaths. **However not all cases are likely to produce deaths.**  **Cases aged over `r ageCutoff` generate 90% of all FL Covid deaths** (this number has been stable pre and post May 20). When we examine the best lag for these relevant cases, the best lag is `r bestLagNew` days.   
 
 ```{r}
 l3
@@ -1060,9 +1320,21 @@ g2
 g3
 ```
 
-## March - May All Deaths vs. Covid Deaths
+## Florida Provisional CDC Cause of Death Data
 
-Florida publishes preliminary total deaths from all causes by month at this [link](http://www.flpublichealth.com/VSprov/rdPage.aspx?rdReport=ProvReports&radReport=T2&drpYear=2020). We can compare the total of all deaths from March through May in 2020 to those from prior years (June data is not yet complete).  The table below subtracts the average of the population growth adjusted March - May deaths from a 2018-2019 baseline (I assume population has grown by 1.2% by year) from 2020's March - May deaths. This is a gross "Excess Death" number.  The Covid Deaths are from the New York Times [database](https://github.com/nytimes/covid-19-data) through May 31.  The last column of the table subtracts the Covid deaths from the Excess Deaths to estimate Excess Deaths not attributable to Covid.
+Data for this table can be found [here](https://data.cdc.gov/NCHS/Weekly-Counts-of-Deaths-by-State-and-Select-Causes/muzy-jte6). It should be interpreted carefully as it is provisional. **It also only includes selected causes of death, so numbers do not sum to the natural cause total.** **It also only compares to one year (2018 was a much worse flu year) and is not adjusted for population growth (approx. 1.1% p.a.).** This table is through `r causeDeath[(nrow(causeDeath)-1),week_ending_date]` (I don't use the most recent reported week because it suffers from lagged reporting). Most of the difference between "Covid multiple cause of death" and "Covid underlying cause" is counted in "influenza and pneumonia." The large increase in "symptoms signs and abnormal" includes a [large group of potential causes](https://en.wikipedia.org/wiki/ICD-10_Chapter_XVIII:_Symptoms,_signs_and_abnormal_clinical_and_laboratory_findings#(R50%E2%80%93R69)_General_symptoms_and_signs). It is an interesting "unknown" category that speculatively could include deaths related to alzheimers/dementia, undercounted Covid deaths and deaths due to lockdown-related reluctance to seek care for other diseases.
+
+```{r}
+cause$`2019 partial`<-comma(cause$`2019 partial`,digits = 0)
+cause$`2020 partial`<-comma(cause$`2020 partial`,digits = 0)
+cause$`Difference`<-comma(cause$Difference, digits = 0)
+cause$`Pct Change`<-percent(cause$`Pct Change`,digits=1)
+kable(cause,caption="CDC Partial Cause Of Death Data",table.attr = "style='width:70%;'")
+```
+
+## March - June All Deaths vs. Covid Deaths
+
+Florida publishes preliminary total deaths from all causes by month at this [link](http://www.flpublichealth.com/VSprov/rdPage.aspx?rdReport=ProvReports&radReport=T2&drpYear=2020). We can compare the total of all deaths from March through June in 2020 to those from prior years (June data is not yet complete).  The table below subtracts the average of the population growth adjusted March - June deaths from a 2018-2019 baseline (I assume population has grown by 1.2% by year) from 2020's March - June deaths. This is a gross "Excess Death" number.  The Covid Deaths are from the New York Times [database](https://github.com/nytimes/covid-19-data) through June 30.  The last column of the table subtracts the Covid deaths from the Excess Deaths to estimate Excess Deaths not attributable to Covid.
 
 Totals for the state are shown on the first row.
 
